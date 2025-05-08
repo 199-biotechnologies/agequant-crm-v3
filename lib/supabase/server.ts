@@ -2,35 +2,36 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
-// Renamed function to be specific and accept cookieStore
-// Using 'any' type temporarily to bypass type issue
-export function createSupabaseServerClient(cookieStore: any) {
+// Attempting to await cookies() before use
+export function createClient() {
+  const cookieStore = cookies() // Get the cookie store instance
+
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
+        // Make the handlers async to await cookieStore operations if needed
+        // Although get/set on the store itself might be synchronous after initial await
+        get: async (name: string) => {
+          // Await might not be needed here if cookieStore is resolved, but doesn't hurt
+          // const store = await cookieStore;
           return cookieStore.get(name)?.value
         },
-        set(name: string, value: string, options: CookieOptions) {
+        set: async (name: string, value: string, options: CookieOptions) => {
           try {
-            // cookieStore passed should be synchronous here
+            // const store = await cookieStore;
             cookieStore.set({ name, value, ...options })
           } catch (error) {
-            // The `set` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
+            // Ignore errors if called from Server Component
           }
         },
-        remove(name: string, options: CookieOptions) {
+        remove: async (name: string, options: CookieOptions) => {
           try {
-            // cookieStore passed should be synchronous here
+            // const store = await cookieStore;
             cookieStore.set({ name, value: '', ...options }) // Use set with empty value
           } catch (error) {
-            // The `remove` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
+            // Ignore errors if called from Server Component
           }
         },
       },

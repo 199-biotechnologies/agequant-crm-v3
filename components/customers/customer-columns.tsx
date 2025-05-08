@@ -29,6 +29,79 @@ import {
 } from "@/components/ui/alert-dialog"
 import { deleteCustomer } from "@/app/customers/actions"; // Import the server action
 
+// Define a separate component for the actions cell to correctly use hooks
+function CustomerActionsCell({ customer }: { customer: Customer }) {
+  const [isPending, startTransition] = useTransition();
+
+  const handleDelete = () => {
+    startTransition(async () => {
+      const formData = new FormData();
+      formData.append('customerId', customer.id);
+      // Explicitly type the expected result from the server action
+      const result: { error?: string; success?: boolean } | undefined = await deleteCustomer(formData);
+      if (result?.error) {
+        toast.error(`Failed to delete customer: ${result.error}`);
+      } else {
+        toast.success(`Customer '${customer.company_contact_name}' deleted successfully.`);
+      }
+    });
+  };
+
+  return (
+    <div className="text-right">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" className="h-8 w-8 p-0">
+            <span className="sr-only">Open menu</span>
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuLabel>Actions</DropdownMenuLabel>
+          <DropdownMenuItem
+            onClick={() => navigator.clipboard.writeText(customer.id)}
+          >
+            Copy customer ID
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <Link href={`/customers/${customer.id}`} passHref legacyBehavior>
+            <DropdownMenuItem>View customer</DropdownMenuItem>
+          </Link>
+          <Link href={`/customers/${customer.id}/edit`} passHref legacyBehavior>
+            <DropdownMenuItem>Edit customer</DropdownMenuItem>
+          </Link>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <DropdownMenuItem
+                className="text-destructive"
+                onSelect={(e) => e.preventDefault()}
+              >
+                Delete customer
+              </DropdownMenuItem>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This action will mark the customer '{customer.company_contact_name}' as deleted. This cannot be undone easily.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <form action={handleDelete}>
+                  <AlertDialogAction type="submit" disabled={isPending}>
+                    {isPending ? "Deleting..." : "Continue"}
+                  </AlertDialogAction>
+                </form>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
 // Define the shape of our customer data based on the Supabase table
 // TODO: Refine this type based on actual Supabase schema if needed (e.g., nullability)
 export type Customer = {
@@ -101,79 +174,7 @@ export const CustomerColumns: ColumnDef<Customer>[] = [
   {
     id: "actions",
     cell: ({ row }) => {
-      const customer = row.original;
-      const [isPending, startTransition] = useTransition();
-
-      const handleDelete = () => {
-        startTransition(async () => {
-          const formData = new FormData();
-          formData.append('customerId', customer.id);
-          const result = await deleteCustomer(formData);
-          if (result?.error) {
-            toast.error(`Failed to delete customer: ${result.error}`);
-          } else {
-            toast.success(`Customer '${customer.company_contact_name}' deleted successfully.`);
-          }
-        });
-      };
-
-      return (
-        <div className="text-right">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="h-8 w-8 p-0">
-                <span className="sr-only">Open menu</span>
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuItem
-                onClick={() => navigator.clipboard.writeText(customer.id)}
-              >
-                Copy customer ID
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <Link href={`/customers/${customer.id}`} passHref legacyBehavior>
-                <DropdownMenuItem>View customer</DropdownMenuItem>
-              </Link>
-              <Link href={`/customers/${customer.id}/edit`} passHref legacyBehavior>
-                <DropdownMenuItem>Edit customer</DropdownMenuItem>
-              </Link>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  {/* Prevent dropdown from closing when trigger is clicked */}
-                  <DropdownMenuItem
-                    className="text-destructive"
-                    onSelect={(e) => e.preventDefault()}
-                  >
-                    Delete customer
-                  </DropdownMenuItem>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This action will mark the customer '{customer.company_contact_name}' as deleted. This cannot be undone easily.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    {/* Use a form to trigger the server action */}
-                    <form action={handleDelete}>
-                       {/* Button inside form triggers action */}
-                       {/* We use AlertDialogAction for styling */}
-                      <AlertDialogAction type="submit" disabled={isPending}>
-                        {isPending ? "Deleting..." : "Continue"}
-                      </AlertDialogAction>
-                    </form>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      )
+      return <CustomerActionsCell customer={row.original} />;
     },
   },
 ]
