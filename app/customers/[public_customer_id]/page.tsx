@@ -57,8 +57,9 @@ export default async function ViewCustomerPage({ params: { public_customer_id } 
         <CardHeader>
           <CardTitle>{customer.company_contact_name}</CardTitle>
           {/* Display public ID as Customer ID, UUID as Internal Ref */}
+          {/* Only display public ID as Customer ID */}
           <CardDescription>
-            Customer ID: <span className="font-mono">{customer.public_customer_id || 'N/A'}</span> | Internal Ref: {customer.id}
+            Customer ID: <span className="font-mono">{customer.public_customer_id || 'N/A'}</span>
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
