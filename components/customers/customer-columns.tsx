@@ -180,7 +180,7 @@ export const CustomerColumns: ColumnDef<Customer>[] = [
         </Button>
       )
     },
-    cell: ({ row }) => <div className="text-center">{row.getValue("preferred_currency")}</div>,
+    cell: ({ row }) => <div>{row.getValue("preferred_currency") || "-"}</div>, // Default to left-align, show '-' if null
   },
   // TODO: Add Address and Notes columns if needed, or keep them for detail view?
   // {

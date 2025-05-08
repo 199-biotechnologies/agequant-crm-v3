@@ -1,8 +1,9 @@
 // app/customers/page.tsx
 import { cookies } from 'next/headers';
 import { createServerClient, type CookieOptions } from '@supabase/ssr' // Import directly
-import { DataTable } from "@/components/ui/data-table"
+// DataTable will be used by the client wrapper
 import { CustomerColumns } from "@/components/customers/customer-columns"
+import { CustomerDataTableClientWrapper } from "@/components/customers/customer-data-table-client-wrapper";
 // No longer importing the helper
 
 // This page is now implicitly a Server Component due to async/await
@@ -47,7 +48,7 @@ export default async function CustomersPage() {
       </div>
 
       {/* Render the data table */}
-      <DataTable columns={CustomerColumns} data={customers || []} />
+      <CustomerDataTableClientWrapper columns={CustomerColumns} data={customers || []} />
       {error && <p className="text-red-500">Could not fetch customer data.</p>}
     </div>
   )
