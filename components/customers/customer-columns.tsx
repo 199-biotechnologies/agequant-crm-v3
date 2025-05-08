@@ -4,6 +4,7 @@
 import { type ColumnDef } from "@tanstack/react-table"
 import { ArrowUpDown, MoreHorizontal } from "lucide-react"
 import Link from "next/link"; // Import Link
+import { toast } from "sonner"; // Import toast
 import { useTransition } from "react"; // For pending state
 
 import { Button } from "@/components/ui/button"
@@ -107,8 +108,12 @@ export const CustomerColumns: ColumnDef<Customer>[] = [
         startTransition(async () => {
           const formData = new FormData();
           formData.append('customerId', customer.id);
-          await deleteCustomer(formData);
-          // TODO: Add toast notification for success/error
+          const result = await deleteCustomer(formData);
+          if (result?.error) {
+            toast.error(`Failed to delete customer: ${result.error}`);
+          } else {
+            toast.success(`Customer '${customer.company_contact_name}' deleted successfully.`);
+          }
         });
       };
 
