@@ -134,7 +134,9 @@ export const CustomerColumns: ColumnDef<Customer>[] = [
                 Copy customer ID
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>View customer</DropdownMenuItem> {/* TODO: Link to /customers/:id */}
+              <Link href={`/customers/${customer.id}`} passHref legacyBehavior>
+                <DropdownMenuItem>View customer</DropdownMenuItem>
+              </Link>
               <Link href={`/customers/${customer.id}/edit`} passHref legacyBehavior>
                 <DropdownMenuItem>Edit customer</DropdownMenuItem>
               </Link>
