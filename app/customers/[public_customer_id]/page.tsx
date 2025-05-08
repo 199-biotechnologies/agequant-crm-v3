@@ -1,4 +1,4 @@
-// app/customers/[id]/page.tsx
+// Will be renamed to: app/customers/[public_customer_id]/page.tsx
 import { cookies } from 'next/headers'; // Import cookies
 import { notFound } from 'next/navigation';
 import { createServerClient, type CookieOptions } from '@supabase/ssr' // Import directly
@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge"; // Assuming you might want badges, e.g., for currency
 
 interface ViewCustomerPageProps {
-  params: { id: string };
+  params: { public_customer_id: string }; // Renamed param
 }
 
 // Helper function to format data for display
@@ -29,13 +29,13 @@ export default async function ViewCustomerPage({ params }: ViewCustomerPageProps
       },
     }
   );
-  const customerId = params.id;
+  const publicCustomerId = params.public_customer_id;
 
-  // Fetch customer data
+  // Fetch customer data by public_customer_id
   const { data: customer, error } = await supabase
     .from('customers')
-    .select('*')
-    .eq('id', customerId)
+    .select('*') // Select all fields including the UUID 'id' and 'public_customer_id'
+    .eq('public_customer_id', publicCustomerId)
     .maybeSingle();
 
   if (error) {
@@ -54,8 +54,8 @@ export default async function ViewCustomerPage({ params }: ViewCustomerPageProps
 
       <Card>
         <CardHeader>
-          <CardTitle>{customer.company_contact_name} <Badge variant="secondary" className="ml-2 font-mono">{customer.customer_code || 'N/A'}</Badge></CardTitle>
-          <CardDescription>Internal ID: {customer.id}</CardDescription>
+          <CardTitle>{customer.company_contact_name} <Badge variant="secondary" className="ml-2 font-mono">{customer.public_customer_id || 'N/A'}</Badge></CardTitle>
+          <CardDescription>Internal Ref: {customer.id}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

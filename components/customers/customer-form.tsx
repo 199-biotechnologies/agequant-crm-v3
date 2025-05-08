@@ -30,8 +30,10 @@ import { customerFormSchema, type CustomerFormData, allowedCurrencies } from "./
 // allowedCurrencies is now imported directly
 
 interface CustomerFormProps {
-  initialData?: Partial<CustomerFormData>;
-  onSubmit: (data: CustomerFormData) => Promise<void | { error: string }>; // Allow returning error object
+  // initialData might need to include the public ID if we are editing
+  initialData?: Partial<CustomerFormData> & { public_customer_id?: string | null };
+  // onSubmit now expects the public ID (string) as the first argument for updates
+  onSubmit: (id: string | null, data: CustomerFormData) => Promise<void | { error: string }>;
 }
 
 export function CustomerForm({ initialData, onSubmit }: CustomerFormProps) {
@@ -54,7 +56,9 @@ export function CustomerForm({ initialData, onSubmit }: CustomerFormProps) {
   function handleSubmit(data: CustomerFormData) {
     setError(null); // Clear previous errors
     startTransition(async () => {
-      const result = await onSubmit(data);
+      // Determine if we are updating (initialData exists and has public_customer_id) or creating
+      const customerIdToSubmit = initialData?.public_customer_id || null;
+      const result = await onSubmit(customerIdToSubmit, data);
       if (result?.error) {
         console.error("Submission error:", result.error);
         setError(result.error); // Display error to user

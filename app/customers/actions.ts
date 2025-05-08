@@ -9,9 +9,9 @@ import { redirect } from 'next/navigation'; // Keep redirect for createCustomer
 import { z } from "zod";
 import { customerFormSchema, type CustomerFormData } from "@/components/customers/customer-form-schema"; // Import schema and type
 
-// Schema for validating the customer ID
+// Schema for validating the public customer ID (short code)
 const DeleteCustomerSchema = z.object({
-  id: z.string().uuid({ message: "Invalid customer ID." }),
+  publicCustomerId: z.string().min(1, { message: "Customer ID is required." }), // Basic validation, DB handles format/uniqueness
 });
 
 export async function deleteCustomer(formData: FormData) {
@@ -31,31 +31,45 @@ export async function deleteCustomer(formData: FormData) {
   );
 
   const validatedFields = DeleteCustomerSchema.safeParse({
-    id: formData.get('customerId'),
+    publicCustomerId: formData.get('publicCustomerId'), // Expecting the short ID from the form
   });
 
   if (!validatedFields.success) {
     console.error("Validation Error:", validatedFields.error.flatten().fieldErrors);
     return {
-      error: "Invalid customer ID provided.",
+      error: "Invalid Customer ID provided.",
     };
   }
 
-  const { id } = validatedFields.data;
+  const { publicCustomerId } = validatedFields.data;
 
-  console.log(`Attempting to soft delete customer with ID: ${id}`);
+  // 1. Fetch the customer by public_customer_id to get its internal UUID id
+  const { data: customer, error: fetchError } = await supabase
+    .from('customers')
+    .select('id, company_contact_name') // Select id and name for logging/confirmation
+    .eq('public_customer_id', publicCustomerId)
+    .single();
 
-  const { error } = await supabase
-    .from("customers")
-    .update({ deleted_at: new Date().toISOString() }) // Set deleted_at timestamp
-    .eq("id", id);
-
-  if (error) {
-    console.error("Error soft deleting customer:", error);
-    return { error: `Database Error: Failed to delete customer. ${error.message}` };
+  if (fetchError || !customer) {
+    console.error(`Error fetching customer by public_customer_id ${publicCustomerId}:`, fetchError);
+    return { error: "Customer not found or database error." };
   }
 
-  console.log(`Customer ${id} soft deleted successfully.`);
+  const internalId = customer.id; // The UUID
+  console.log(`Attempting to soft delete customer with public ID: ${publicCustomerId} (Internal UUID: ${internalId}, Name: ${customer.company_contact_name})`);
+
+  // 2. Perform the soft delete using the internal UUID id
+  const { error: deleteError } = await supabase
+    .from("customers")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", internalId); // Use the UUID for the actual delete operation
+
+  if (deleteError) {
+    console.error("Error soft deleting customer:", deleteError);
+    return { error: `Database Error: Failed to delete customer. ${deleteError.message}` };
+  }
+
+  console.log(`Customer with public ID ${publicCustomerId} (Name: ${customer.company_contact_name}) soft deleted successfully.`);
   // Explicitly return success before revalidation/redirect
   // Although the client might not receive this due to redirect, it satisfies TS
   const result = { success: true };

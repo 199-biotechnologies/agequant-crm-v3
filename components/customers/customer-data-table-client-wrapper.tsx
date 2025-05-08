@@ -15,7 +15,8 @@ export function CustomerDataTableClientWrapper({ columns, data }: CustomerDataTa
   const router = useRouter();
 
   const handleRowClick = (row: Row<Customer>) => {
-    router.push(`/customers/${row.original.id}`);
+    // Navigate using the public customer ID
+    router.push(`/customers/${row.original.public_customer_id}`);
   };
 
   return <DataTable columns={columns} data={data} onRowClick={handleRowClick} />;

@@ -1,14 +1,14 @@
--- Add customer_code column to customers table
+-- Add public_customer_id column to customers table
 ALTER TABLE customers
-ADD COLUMN customer_code TEXT;
+ADD COLUMN public_customer_id TEXT;
 
--- Create unique index on customer_code
+-- Create unique index on public_customer_id
 -- This will also help with performance of lookups if needed
-CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_customer_code ON customers (customer_code);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_public_customer_id ON customers (public_customer_id);
 
 -- Function to generate a 5-character alphanumeric code
 -- 3 random digits and 2 random uppercase letters, shuffled
-CREATE OR REPLACE FUNCTION generate_customer_code()
+CREATE OR REPLACE FUNCTION generate_public_customer_id()
 RETURNS TEXT AS $$
 DECLARE
     -- Excluding I, L, O for readability
@@ -46,7 +46,7 @@ BEGIN
 
     -- Ensure uniqueness (simple retry loop, consider max attempts for production)
     -- For very high collision rates, a more robust generation/checking strategy might be needed.
-    WHILE EXISTS(SELECT 1 FROM customers WHERE customer_code = final_code) LOOP
+    WHILE EXISTS(SELECT 1 FROM customers WHERE public_customer_id = final_code) LOOP
         result_array := '{}'; -- Reset array
         -- Add 3 random numbers
         FOR k IN 1..3 LOOP
@@ -72,20 +72,20 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
--- Trigger function to set customer_code on new customer insert
-CREATE OR REPLACE FUNCTION set_customer_code()
+-- Trigger function to set public_customer_id on new customer insert
+CREATE OR REPLACE FUNCTION set_public_customer_id()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.customer_code := generate_customer_code();
+    NEW.public_customer_id := generate_public_customer_id();
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
 -- Trigger to execute the function before insert on customers table
-CREATE TRIGGER set_customer_code_trigger
+CREATE TRIGGER set_public_customer_id_trigger
 BEFORE INSERT ON customers
 FOR EACH ROW
-EXECUTE FUNCTION set_customer_code();
+EXECUTE FUNCTION set_public_customer_id();
 
 -- Backfill existing customers (optional, but good for consistency)
 -- This might take time on large tables.
@@ -94,13 +94,13 @@ DO $$
 DECLARE
     r RECORD;
 BEGIN
-    FOR r IN SELECT id FROM customers WHERE customer_code IS NULL LOOP
-        UPDATE customers SET customer_code = generate_customer_code() WHERE id = r.id;
+    FOR r IN SELECT id FROM customers WHERE public_customer_id IS NULL LOOP
+        UPDATE customers SET public_customer_id = generate_public_customer_id() WHERE id = r.id;
     END LOOP;
 END $$;
 
 -- Add NOT NULL constraint after backfilling (if desired)
 -- Ensure all existing rows have a customer_code before applying this.
--- ALTER TABLE customers ALTER COLUMN customer_code SET NOT NULL;
--- If you add NOT NULL, the unique index `idx_customers_customer_code` might be redundant
+-- ALTER TABLE customers ALTER COLUMN public_customer_id SET NOT NULL;
+-- If you add NOT NULL, the unique index `idx_customers_public_customer_id` might be redundant
 -- with a UNIQUE NOT NULL constraint, but having the explicit index is fine.

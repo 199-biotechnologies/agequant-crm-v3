@@ -1,4 +1,4 @@
-// app/customers/[id]/edit/page.tsx
+// Path: app/customers/[id]/edit/page.tsx (where [id] is public_customer_id)
 import { notFound, redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { CustomerForm } from "@/components/customers/customer-form";
@@ -8,7 +8,7 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr' // Import
 // Removed duplicate imports
 
 interface EditCustomerPageProps {
-  params: { id: string };
+  params: { id: string }; // This 'id' is the public_customer_id from the route
 }
 
 export default async function EditCustomerPage({ params }: EditCustomerPageProps) {
@@ -26,13 +26,13 @@ export default async function EditCustomerPage({ params }: EditCustomerPageProps
       },
     }
   );
-  const customerId = params.id;
+  const publicCustomerId = params.id; // Treat the param as the public ID
 
-  // Fetch existing customer data
+  // Fetch existing customer data using public_customer_id
   const { data: customer, error: fetchError } = await supabase
     .from('customers')
-    .select('*')
-    .eq('id', customerId)
+    .select('*') // Select all fields including the internal UUID 'id'
+    .eq('public_customer_id', publicCustomerId) // Query by the public ID
     .maybeSingle(); // Use maybeSingle() as the customer might not exist
 
   if (fetchError) {
@@ -45,7 +45,8 @@ export default async function EditCustomerPage({ params }: EditCustomerPageProps
   }
 
   // Server Action to handle form submission for updates
-  const handleUpdateCustomer = async (data: CustomerFormData) => {
+  // Server Action needs the publicCustomerId to find the record
+  const handleUpdateCustomer = async (publicId: string, data: CustomerFormData) => {
     "use server";
 
     // No need to get cookieStore again if createClient handles it
@@ -65,7 +66,20 @@ export default async function EditCustomerPage({ params }: EditCustomerPageProps
       }
     );
 
-    // Prepare data for update (handle optional fields)
+    // 1. Fetch customer by publicId to get internal UUID
+    const { data: existingCustomer, error: fetchErr } = await supabase
+      .from('customers')
+      .select('id') // Only need the internal id
+      .eq('public_customer_id', publicId)
+      .single();
+
+    if (fetchErr || !existingCustomer) {
+      console.error(`Error fetching customer by public ID ${publicId} for update:`, fetchErr);
+      return { error: "Customer not found or database error during update lookup." };
+    }
+    const internalId = existingCustomer.id; // The UUID to use for the update
+
+    // 2. Prepare data for update (handle optional fields)
     const customerData = {
       company_contact_name: data.company_contact_name,
       email: data.email,
@@ -81,7 +95,7 @@ export default async function EditCustomerPage({ params }: EditCustomerPageProps
     const { error } = await supabase
       .from('customers')
       .update(customerData)
-      .eq('id', customerId); // Ensure we update the correct customer
+      .eq('id', internalId); // Ensure we update using the internal UUID
 
     if (error) {
       console.error('Error updating customer:', error);
@@ -91,7 +105,7 @@ export default async function EditCustomerPage({ params }: EditCustomerPageProps
       console.log("Customer updated successfully.");
       // Revalidate relevant paths
       revalidatePath('/customers');
-      revalidatePath(`/customers/${customerId}/edit`); // Revalidate this page too
+      revalidatePath(`/customers/${publicId}/edit`); // Revalidate using the public ID
       // Redirect to the customers list page on success
       redirect('/customers');
     }
@@ -112,8 +126,16 @@ export default async function EditCustomerPage({ params }: EditCustomerPageProps
     <div className="space-y-6">
       <h1 className="text-3xl font-bold tracking-tight">Edit Customer</h1>
       <CustomerForm
-        onSubmit={handleUpdateCustomer}
-        initialData={initialFormData}
+        // Pass the publicCustomerId to the onSubmit handler
+        // Ensure the function passed matches the expected (id: string | null, data: CustomerFormData) signature
+        onSubmit={(id, formData) => {
+          // id here is the one passed by the form component (public_customer_id or null)
+          // We already have publicCustomerId from params, which we know is not null here.
+          // Call the server action with the correct public ID and form data.
+          return handleUpdateCustomer(publicCustomerId, formData);
+        }}
+        // Pass public_customer_id in initialData so the form knows it's an update
+        initialData={{ ...initialFormData, public_customer_id: customer.public_customer_id }}
       />
     </div>
   );

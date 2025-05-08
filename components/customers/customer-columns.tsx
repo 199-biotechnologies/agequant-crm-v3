@@ -36,7 +36,8 @@ function CustomerActionsCell({ customer }: { customer: Customer }) {
   const handleDelete = () => {
     startTransition(async () => {
       const formData = new FormData();
-      formData.append('customerId', customer.id);
+      // Pass the public ID to the delete action
+      formData.append('publicCustomerId', customer.public_customer_id || ''); // Handle potential null
       // Explicitly type the expected result from the server action
       const result: { error?: string; success?: boolean } | undefined = await deleteCustomer(formData);
       if (result?.error) {
@@ -59,15 +60,18 @@ function CustomerActionsCell({ customer }: { customer: Customer }) {
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Actions</DropdownMenuLabel>
           <DropdownMenuItem
-            onClick={() => navigator.clipboard.writeText(customer.id)}
+            // Copy the public ID
+            onClick={() => navigator.clipboard.writeText(customer.public_customer_id || '')}
           >
             Copy customer ID
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <Link href={`/customers/${customer.id}`} passHref legacyBehavior>
+          {/* Link using public ID */}
+          <Link href={`/customers/${customer.public_customer_id}`} passHref legacyBehavior>
             <DropdownMenuItem>View customer</DropdownMenuItem>
           </Link>
-          <Link href={`/customers/${customer.id}/edit`} passHref legacyBehavior>
+          {/* Link using public ID */}
+          <Link href={`/customers/${customer.public_customer_id}/edit`} passHref legacyBehavior>
             <DropdownMenuItem>Edit customer</DropdownMenuItem>
           </Link>
           <AlertDialog>
@@ -106,7 +110,7 @@ function CustomerActionsCell({ customer }: { customer: Customer }) {
 // TODO: Refine this type based on actual Supabase schema if needed (e.g., nullability)
 export type Customer = {
   id: string // UUID
-  customer_code: string | null // Can be null if backfill hasn't run or for some edge cases
+  public_customer_id: string | null // The short, readable, public ID
   company_contact_name: string
   email: string | null // Now optional
   phone: string | null
@@ -119,19 +123,19 @@ export type Customer = {
 
 export const CustomerColumns: ColumnDef<Customer>[] = [
   {
-    accessorKey: "customer_code",
+    accessorKey: "public_customer_id", // Use the correct accessor
     header: ({ column }) => {
       return (
         <Button
           variant="ghost"
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
         >
-          Code
+          Customer ID
           <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
       )
     },
-    cell: ({ row }) => <div className="font-mono">{row.getValue("customer_code") || "-"}</div>,
+    cell: ({ row }) => <div className="font-mono">{row.getValue("public_customer_id") || "-"}</div>,
   },
   {
     accessorKey: "company_contact_name",
