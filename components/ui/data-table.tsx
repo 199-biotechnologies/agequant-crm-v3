@@ -22,9 +22,17 @@ interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[]
   data: TData[]
   onRowClick?: (row: Row<TData>) => void // Optional onRowClick handler
+  filterColumnId?: string // Optional column ID to use for filtering
+  filterPlaceholder?: string // Optional placeholder for the filter input
 }
 
-export function DataTable<TData, TValue>({ columns, data, onRowClick }: DataTableProps<TData, TValue>) {
+export function DataTable<TData, TValue>({
+  columns,
+  data,
+  onRowClick,
+  filterColumnId, // Get the filter column ID
+  filterPlaceholder // Get the placeholder text
+}: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
 
@@ -45,14 +53,17 @@ export function DataTable<TData, TValue>({ columns, data, onRowClick }: DataTabl
 
   return (
     <div>
-      <div className="flex items-center py-4">
-        <Input
-          placeholder="Filter by customer..."
-          value={(table.getColumn("customer")?.getFilterValue() as string) ?? ""}
-          onChange={(event) => table.getColumn("customer")?.setFilterValue(event.target.value)}
-          className="max-w-sm"
-        />
-      </div>
+      {/* Only show filter input if filterColumnId is provided */}
+      {filterColumnId && (
+        <div className="flex items-center py-4">
+          <Input
+            placeholder={filterPlaceholder || `Filter by ${filterColumnId}...`}
+            value={(table.getColumn(filterColumnId)?.getFilterValue() as string) ?? ""}
+            onChange={(event) => table.getColumn(filterColumnId)?.setFilterValue(event.target.value)}
+            className="max-w-sm"
+          />
+        </div>
+      )}
       <div className="rounded-md border">
         <Table>
           <TableHeader>

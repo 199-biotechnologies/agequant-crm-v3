@@ -4,7 +4,7 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
 // import { z } from "zod"; // No longer needed directly here
-import { useState, useTransition } from "react"; // Import useTransition for Server Actions
+// Remove useState, useTransition - will rely on form action
 
 import { Button } from "@/components/ui/button"
 import {
@@ -31,14 +31,14 @@ import { customerFormSchema, type CustomerFormData, allowedCurrencies } from "./
 
 interface CustomerFormProps {
   // initialData might need to include the public ID if we are editing
-  initialData?: Partial<CustomerFormData> & { public_customer_id?: string | null };
-  // onSubmit now expects the public ID (string) as the first argument for updates
-  onSubmit: (id: string | null, data: CustomerFormData) => Promise<void | { error: string }>;
+  initialData?: Partial<CustomerFormData> & { public_customer_id?: string | null }; // Keep initialData structure
+  // Replace onSubmit with serverAction prop
+  serverAction: (formData: FormData) => Promise<void | { error?: string; fieldErrors?: any }>;
 }
 
-export function CustomerForm({ initialData, onSubmit }: CustomerFormProps) {
-  const [isPending, startTransition] = useTransition(); // Hook for Server Action pending state
-  const [error, setError] = useState<string | null>(null); // State for submission errors
+export function CustomerForm({ initialData, serverAction }: CustomerFormProps) {
+  // Remove useTransition and error state for now.
+  // Consider useFormState for more complex feedback later if needed.
   const form = useForm<CustomerFormData>({
     resolver: zodResolver(customerFormSchema),
     defaultValues: {
@@ -52,23 +52,17 @@ export function CustomerForm({ initialData, onSubmit }: CustomerFormProps) {
     },
   })
 
-  // Wrapper function to handle the Server Action transition
-  function handleSubmit(data: CustomerFormData) {
-    setError(null); // Clear previous errors
-    startTransition(async () => {
-      // Determine if we are updating (initialData exists and has public_customer_id) or creating
-      const customerIdToSubmit = initialData?.public_customer_id || null;
-      const result = await onSubmit(customerIdToSubmit, data);
-      if (result?.error) {
-        console.error("Submission error:", result.error);
-        setError(result.error); // Display error to user
-      }
-    });
-  }
+  // No longer need the handleSubmit wrapper or startTransition
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-8">
+      {/* Use the action prop for the server action */}
+      {/* Remove onSubmit={form.handleSubmit(handleSubmit)} */}
+      <form action={serverAction} className="space-y-8">
+        {/* Add hidden input for publicCustomerId when editing */}
+        {initialData?.public_customer_id && (
+          <input type="hidden" name="publicCustomerId" value={initialData.public_customer_id} />
+        )}
         {/* Company / Contact Name */}
         <FormField
           control={form.control}
@@ -184,10 +178,11 @@ export function CustomerForm({ initialData, onSubmit }: CustomerFormProps) {
           )}
         />
 
-        <Button type="submit" disabled={isPending}>
-          {isPending ? "Saving..." : (initialData ? "Update Customer" : "Save Customer")}
+        {/* Button type is submit, disabled state might need useFormStatus later */}
+        <Button type="submit">
+          {initialData ? "Update Customer" : "Save Customer"}
         </Button>
-        {error && <p className="text-sm font-medium text-destructive">{error}</p>}
+        {/* Error display needs rethinking with form actions, maybe useFormState */}
       </form>
     </Form>
   )

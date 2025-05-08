@@ -79,9 +79,92 @@ export async function deleteCustomer(formData: FormData) {
 
   return result; // Return the success object
 }
+// New Server Action for updating a customer
+export async function updateCustomer(publicCustomerId: string, formData: FormData) {
+  // Validate publicCustomerId (basic check, could enhance later)
+  // Basic validation - might throw error or handle differently with useFormState
+  if (!publicCustomerId || typeof publicCustomerId !== 'string') {
+    console.error("Invalid Public Customer ID provided for update.");
+    // Returning void for now to satisfy form action type
+    return;
+  }
+
+  const cookieStore = await cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) { return cookieStore.get(name)?.value },
+        set(name: string, value: string, options: CookieOptions) { cookieStore.set({ name, value, ...options }) },
+        remove(name: string, options: CookieOptions) { cookieStore.set({ name, value: '', ...options }) },
+      },
+    }
+  );
+
+  // Extract data from FormData and validate using the schema
+  const rawFormData = Object.fromEntries(formData.entries());
+  // console.log("Raw form data for update:", rawFormData); // Debugging
+  const validatedFields = customerFormSchema.safeParse(rawFormData);
+
+  if (!validatedFields.success) {
+    console.error("Server Validation Error (Update):", validatedFields.error.flatten().fieldErrors);
+    // TODO: Improve error feedback to the form
+    // Returning void for now. Consider useFormState for detailed errors.
+    return;
+  }
+  // console.log("Validated data for update:", validatedFields.data); // Debugging
+
+
+  // 1. Fetch customer by publicCustomerId to get internal UUID
+  const { data: existingCustomer, error: fetchErr } = await supabase
+    .from('customers')
+    .select('id') // Only need the internal id
+    .eq('public_customer_id', publicCustomerId)
+    .single();
+
+  if (fetchErr || !existingCustomer) {
+    console.error(`Error fetching customer by public ID ${publicCustomerId} for update:`, fetchErr);
+    // Returning void for now.
+    return;
+  }
+  const internalId = existingCustomer.id; // The UUID to use for the update
+
+  // 2. Prepare data for update (handle optional fields)
+  const customerData = {
+    company_contact_name: validatedFields.data.company_contact_name,
+    email: validatedFields.data.email || null, // Ensure null if empty/undefined
+    phone: validatedFields.data.phone || null,
+    preferred_currency: validatedFields.data.preferred_currency || null, // Ensure null if empty/undefined
+    address: validatedFields.data.address || null,
+    notes: validatedFields.data.notes || null,
+    // updated_at will be handled by the database trigger
+  };
+   // console.log("Data to update in DB:", customerData); // Debugging
+
+
+  // 3. Perform the update using the internal UUID id
+  const { error: updateError } = await supabase
+    .from('customers')
+    .update(customerData)
+    .eq('id', internalId);
+
+  if (updateError) {
+    console.error('Error updating customer:', updateError);
+    // Returning void for now.
+    return;
+  }
+
+  // On success:
+  revalidatePath('/customers'); // Revalidate the list page
+  revalidatePath(`/customers/${publicCustomerId}`); // Revalidate view page
+  revalidatePath(`/customers/${publicCustomerId}/edit`); // Revalidate edit page
+  redirect('/customers'); // Redirect to the list page
+  // Note: redirect() throws an error, no explicit success return needed for client.
+}
 
 // New Server Action for creating a customer
-export async function createCustomer(data: CustomerFormData) {
+export async function createCustomer(formData: FormData) {
   // Explicitly await cookies() inside the Server Action
   const cookieStore = await cookies();
    // Create client directly within the Server Action
@@ -97,22 +180,22 @@ export async function createCustomer(data: CustomerFormData) {
     }
   );
 
-  // Validate the data again on the server side (optional but recommended)
-  const validatedFields = customerFormSchema.safeParse(data);
+  // Extract data from FormData and validate using the schema
+  const rawFormData = Object.fromEntries(formData.entries());
+  const validatedFields = customerFormSchema.safeParse(rawFormData);
   if (!validatedFields.success) {
     console.error("Server Validation Error:", validatedFields.error.flatten().fieldErrors);
-    return {
-      error: "Invalid data provided.",
-    };
+    // Returning void for now. Consider useFormState for detailed errors.
+    return;
   }
 
   // Map validated data to database columns
   const customerData = {
     company_contact_name: validatedFields.data.company_contact_name,
-    email: validatedFields.data.email,
+    email: validatedFields.data.email || null, // Ensure null if empty/undefined
     phone: validatedFields.data.phone || null,
-    preferred_currency: validatedFields.data.preferred_currency || 'USD', // Default to USD if not provided
-    address: validatedFields.data.address,
+    preferred_currency: validatedFields.data.preferred_currency || 'USD', // Default to USD
+    address: validatedFields.data.address || null,
     notes: validatedFields.data.notes || null,
   };
 
@@ -122,7 +205,8 @@ export async function createCustomer(data: CustomerFormData) {
 
   if (error) {
     console.error('Error inserting customer:', error);
-    return { error: `Failed to create customer: ${error.message}` };
+    // Returning void for now.
+    return;
   }
 
   // On success:

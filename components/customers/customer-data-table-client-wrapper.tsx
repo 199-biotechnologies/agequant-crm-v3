@@ -19,5 +19,13 @@ export function CustomerDataTableClientWrapper({ columns, data }: CustomerDataTa
     router.push(`/customers/${row.original.public_customer_id}`);
   };
 
-  return <DataTable columns={columns} data={data} onRowClick={handleRowClick} />;
+  return (
+    <DataTable
+      columns={columns}
+      data={data}
+      onRowClick={handleRowClick}
+      filterColumnId="company_contact_name" // Specify column to filter
+      filterPlaceholder="Filter by name..." // Custom placeholder
+    />
+  );
 }
