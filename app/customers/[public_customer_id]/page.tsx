@@ -55,8 +55,11 @@ export default async function ViewCustomerPage({ params: { public_customer_id } 
 
       <Card>
         <CardHeader>
-          <CardTitle>{customer.company_contact_name} <Badge variant="secondary" className="ml-2 font-mono">{customer.public_customer_id || 'N/A'}</Badge></CardTitle>
-          <CardDescription>Internal Ref: {customer.id}</CardDescription>
+          <CardTitle>{customer.company_contact_name}</CardTitle>
+          {/* Display public ID as Customer ID, UUID as Internal Ref */}
+          <CardDescription>
+            Customer ID: <span className="font-mono">{customer.public_customer_id || 'N/A'}</span> | Internal Ref: {customer.id}
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
