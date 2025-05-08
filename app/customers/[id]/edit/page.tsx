@@ -3,16 +3,29 @@ import { notFound, redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { CustomerForm } from "@/components/customers/customer-form";
 import { type CustomerFormData } from "@/components/customers/customer-form-schema";
-import { cookies } from 'next/headers'; // Import cookies
-import { createSupabaseServerClient } from "@/lib/supabase/server"; // Import the updated helper
+import { cookies } from 'next/headers';
+import { createServerClient, type CookieOptions } from '@supabase/ssr' // Import directly
+// Removed duplicate imports
 
 interface EditCustomerPageProps {
   params: { id: string };
 }
 
 export default async function EditCustomerPage({ params }: EditCustomerPageProps) {
-  const cookieStore = cookies(); // Get cookie store
-  const supabase = createSupabaseServerClient(cookieStore); // Pass cookie store
+  // Explicitly await the cookie store
+  const cookieStore = await cookies();
+  // Create client directly within the Server Component
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) { return cookieStore.get(name)?.value },
+        set(name: string, value: string, options: CookieOptions) { cookieStore.set({ name, value, ...options }) },
+        remove(name: string, options: CookieOptions) { cookieStore.set({ name, value: '', ...options }) },
+      },
+    }
+  );
   const customerId = params.id;
 
   // Fetch existing customer data
@@ -37,8 +50,20 @@ export default async function EditCustomerPage({ params }: EditCustomerPageProps
 
     // No need to get cookieStore again if createClient handles it
     // Server Actions run in their own context, need to get cookies again
-    const cookieStore = cookies();
-    const supabase = createSupabaseServerClient(cookieStore);
+    // Explicitly await cookies() inside the Server Action as well
+    const cookieStore = await cookies();
+    // Create client directly within the Server Action
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) { return cookieStore.get(name)?.value },
+          set(name: string, value: string, options: CookieOptions) { cookieStore.set({ name, value, ...options }) },
+          remove(name: string, options: CookieOptions) { cookieStore.set({ name, value: '', ...options }) },
+        },
+      }
+    );
 
     // Prepare data for update (handle optional fields)
     const customerData = {

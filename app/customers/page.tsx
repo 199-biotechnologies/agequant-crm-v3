@@ -1,14 +1,28 @@
 // app/customers/page.tsx
-import { cookies } from 'next/headers'; // Import cookies
+import { cookies } from 'next/headers';
+import { createServerClient, type CookieOptions } from '@supabase/ssr' // Import directly
 import { DataTable } from "@/components/ui/data-table"
-import { CustomerColumns, type Customer } from "@/components/customers/customer-columns"
-import { createSupabaseServerClient } from "@/lib/supabase/server"; // Import the updated helper
+import { CustomerColumns } from "@/components/customers/customer-columns"
+// No longer importing the helper
 
 // This page is now implicitly a Server Component due to async/await
 export default async function CustomersPage() {
-  const cookieStore = cookies(); // Get cookie store
-  // Create a Supabase client instance specifically for this server component request
-  const supabase = createSupabaseServerClient(cookieStore); // Pass cookie store
+  // Explicitly await the cookie store
+  const cookieStore = await cookies()
+
+  // Create client directly within the Server Component
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value
+        },
+        // No need for set/remove in read-only page component
+      },
+    }
+  )
 
   // Fetch customer data
   // Ensure RLS policies allow reads for the 'anon' key or authenticated user

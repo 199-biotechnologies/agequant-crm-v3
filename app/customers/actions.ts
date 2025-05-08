@@ -2,9 +2,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies } from 'next/headers'; // Import cookies
-import { createSupabaseServerClient } from "@/lib/supabase/server"; // Import the updated helper
-import { redirect } from 'next/navigation';
+import { cookies } from 'next/headers';
+import { createServerClient, type CookieOptions } from '@supabase/ssr' // Import directly
+// No longer importing the helper
+import { redirect } from 'next/navigation'; // Keep redirect for createCustomer
 import { z } from "zod";
 import { customerFormSchema, type CustomerFormData } from "@/components/customers/customer-form-schema"; // Import schema and type
 
@@ -14,8 +15,20 @@ const DeleteCustomerSchema = z.object({
 });
 
 export async function deleteCustomer(formData: FormData) {
-  const cookieStore = cookies(); // Get cookie store
-  const supabase = createSupabaseServerClient(cookieStore); // Pass cookie store
+  // Explicitly await cookies() inside the Server Action
+  const cookieStore = await cookies();
+  // Create client directly within the Server Action
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) { return cookieStore.get(name)?.value },
+        set(name: string, value: string, options: CookieOptions) { cookieStore.set({ name, value, ...options }) },
+        remove(name: string, options: CookieOptions) { cookieStore.set({ name, value: '', ...options }) },
+      },
+    }
+  );
 
   const validatedFields = DeleteCustomerSchema.safeParse({
     id: formData.get('customerId'),
@@ -55,8 +68,20 @@ export async function deleteCustomer(formData: FormData) {
 
 // New Server Action for creating a customer
 export async function createCustomer(data: CustomerFormData) {
-  const cookieStore = cookies(); // Get cookie store
-  const supabase = createSupabaseServerClient(cookieStore); // Pass cookie store
+  // Explicitly await cookies() inside the Server Action
+  const cookieStore = await cookies();
+   // Create client directly within the Server Action
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) { return cookieStore.get(name)?.value },
+        set(name: string, value: string, options: CookieOptions) { cookieStore.set({ name, value, ...options }) },
+        remove(name: string, options: CookieOptions) { cookieStore.set({ name, value: '', ...options }) },
+      },
+    }
+  );
 
   // Validate the data again on the server side (optional but recommended)
   const validatedFields = customerFormSchema.safeParse(data);
@@ -80,5 +105,16 @@ export async function createCustomer(data: CustomerFormData) {
   const { error } = await supabase
     .from('customers')
     .insert([customerData]);
+
+  if (error) {
+    console.error('Error inserting customer:', error);
+    return { error: `Failed to create customer: ${error.message}` };
+  }
+
+  // On success:
+  revalidatePath('/customers'); // Revalidate the list page
+  redirect('/customers'); // Redirect to the list page
+  // Note: redirect() throws an error, so code after it won't run,
+  // hence no explicit { success: true } return is needed here for the client.
 
 }
