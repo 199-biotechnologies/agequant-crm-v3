@@ -1,11 +1,12 @@
 // app/customers/page.tsx
 import { DataTable } from "@/components/ui/data-table"
 import { CustomerColumns, type Customer } from "@/components/customers/customer-columns"
-import { createClient } from "@/lib/supabase/server"; // Import the server client helper
+import { createClient } from "@/lib/supabase/server"; // Import the original helper name
 
 // This page is now implicitly a Server Component due to async/await
 export default async function CustomersPage() {
   // Create a Supabase client instance specifically for this server component request
+  // createClient calls cookies() internally now
   const supabase = createClient();
 
   // Fetch customer data

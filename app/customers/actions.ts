@@ -2,6 +2,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from 'next/headers'; // Import cookies
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from 'next/navigation';
 import { z } from "zod";
@@ -13,7 +14,8 @@ const DeleteCustomerSchema = z.object({
 });
 
 export async function deleteCustomer(formData: FormData) {
-  const supabase = createClient();
+  const cookieStore = cookies(); // Get cookie store
+  const supabase = createClient(); // Calls cookies() internally
 
   const validatedFields = DeleteCustomerSchema.safeParse({
     id: formData.get('customerId'),
@@ -53,7 +55,8 @@ export async function deleteCustomer(formData: FormData) {
 
 // New Server Action for creating a customer
 export async function createCustomer(data: CustomerFormData) {
-  const supabase = createClient();
+  const cookieStore = cookies(); // Get cookie store
+  const supabase = createClient(); // Calls cookies() internally
 
   // Validate the data again on the server side (optional but recommended)
   const validatedFields = customerFormSchema.safeParse(data);

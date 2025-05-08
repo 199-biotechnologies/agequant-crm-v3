@@ -1,4 +1,5 @@
 // app/customers/[id]/page.tsx
+import { cookies } from 'next/headers'; // Import cookies
 import { notFound } from 'next/navigation';
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -14,7 +15,8 @@ function formatDisplayValue(value: string | null | undefined): string {
 }
 
 export default async function ViewCustomerPage({ params }: ViewCustomerPageProps) {
-  const supabase = createClient();
+  const cookieStore = cookies(); // Get cookie store
+  const supabase = createClient(); // Calls cookies() internally
   const customerId = params.id;
 
   // Fetch customer data
