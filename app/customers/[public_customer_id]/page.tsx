@@ -15,7 +15,8 @@ function formatDisplayValue(value: string | null | undefined): string {
   return value || "-"; // Display '-' for null or empty values
 }
 
-export default async function ViewCustomerPage({ params }: ViewCustomerPageProps) {
+// Destructure params directly in the function signature
+export default async function ViewCustomerPage({ params: { public_customer_id } }: ViewCustomerPageProps) {
   // Explicitly await the cookie store
   const cookieStore = await cookies();
   // Create client directly within the Server Component
@@ -29,13 +30,13 @@ export default async function ViewCustomerPage({ params }: ViewCustomerPageProps
       },
     }
   );
-  const publicCustomerId = params.public_customer_id;
+  // const publicCustomerId = params.public_customer_id; // No longer needed, use destructured prop
 
   // Fetch customer data by public_customer_id
   const { data: customer, error } = await supabase
     .from('customers')
     .select('*') // Select all fields including the UUID 'id' and 'public_customer_id'
-    .eq('public_customer_id', publicCustomerId)
+    .eq('public_customer_id', public_customer_id) // Use destructured prop
     .maybeSingle();
 
   if (error) {
