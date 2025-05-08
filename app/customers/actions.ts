@@ -3,7 +3,9 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { redirect } from 'next/navigation';
 import { z } from "zod";
+import { customerFormSchema, type CustomerFormData } from "@/components/customers/customer-form-schema"; // Import schema and type
 
 // Schema for validating the customer ID
 const DeleteCustomerSchema = z.object({
@@ -39,9 +41,41 @@ export async function deleteCustomer(formData: FormData) {
   }
 
   console.log(`Customer ${id} soft deleted successfully.`);
+  // Explicitly return success before revalidation/redirect
+  // Although the client might not receive this due to redirect, it satisfies TS
+  const result = { success: true };
+
   // Revalidate the customers list page cache
   revalidatePath("/customers");
 
-  // Optionally return success, though revalidation handles UI update
-  return { success: true };
+  return result; // Return the success object
+}
+
+// New Server Action for creating a customer
+export async function createCustomer(data: CustomerFormData) {
+  const supabase = createClient();
+
+  // Validate the data again on the server side (optional but recommended)
+  const validatedFields = customerFormSchema.safeParse(data);
+  if (!validatedFields.success) {
+    console.error("Server Validation Error:", validatedFields.error.flatten().fieldErrors);
+    return {
+      error: "Invalid data provided.",
+    };
+  }
+
+  // Map validated data to database columns
+  const customerData = {
+    company_contact_name: validatedFields.data.company_contact_name,
+    email: validatedFields.data.email,
+    phone: validatedFields.data.phone || null,
+    preferred_currency: validatedFields.data.preferred_currency,
+    address: validatedFields.data.address,
+    notes: validatedFields.data.notes || null,
+  };
+
+  const { error } = await supabase
+    .from('customers')
+    .insert([customerData]);
+
 }
