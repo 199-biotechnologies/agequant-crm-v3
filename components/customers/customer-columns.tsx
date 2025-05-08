@@ -3,6 +3,8 @@
 
 import { type ColumnDef } from "@tanstack/react-table"
 import { ArrowUpDown, MoreHorizontal } from "lucide-react"
+import Link from "next/link"; // Import Link
+import { useTransition } from "react"; // For pending state
 
 import { Button } from "@/components/ui/button"
 import {
@@ -13,6 +15,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { deleteCustomer } from "@/app/customers/actions"; // Import the server action
 
 // Define the shape of our customer data based on the Supabase table
 // TODO: Refine this type based on actual Supabase schema if needed (e.g., nullability)
@@ -86,7 +100,17 @@ export const CustomerColumns: ColumnDef<Customer>[] = [
   {
     id: "actions",
     cell: ({ row }) => {
-      const customer = row.original
+      const customer = row.original;
+      const [isPending, startTransition] = useTransition();
+
+      const handleDelete = () => {
+        startTransition(async () => {
+          const formData = new FormData();
+          formData.append('customerId', customer.id);
+          await deleteCustomer(formData);
+          // TODO: Add toast notification for success/error
+        });
+      };
 
       return (
         <div className="text-right">
@@ -106,8 +130,39 @@ export const CustomerColumns: ColumnDef<Customer>[] = [
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem>View customer</DropdownMenuItem> {/* TODO: Link to /customers/:id */}
-              <DropdownMenuItem>Edit customer</DropdownMenuItem> {/* TODO: Link to /customers/:id/edit */}
-              <DropdownMenuItem className="text-destructive">Delete customer</DropdownMenuItem> {/* TODO: Implement delete */}
+              <Link href={`/customers/${customer.id}/edit`} passHref legacyBehavior>
+                <DropdownMenuItem>Edit customer</DropdownMenuItem>
+              </Link>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  {/* Prevent dropdown from closing when trigger is clicked */}
+                  <DropdownMenuItem
+                    className="text-destructive"
+                    onSelect={(e) => e.preventDefault()}
+                  >
+                    Delete customer
+                  </DropdownMenuItem>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This action will mark the customer '{customer.company_contact_name}' as deleted. This cannot be undone easily.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    {/* Use a form to trigger the server action */}
+                    <form action={handleDelete}>
+                       {/* Button inside form triggers action */}
+                       {/* We use AlertDialogAction for styling */}
+                      <AlertDialogAction type="submit" disabled={isPending}>
+                        {isPending ? "Deleting..." : "Continue"}
+                      </AlertDialogAction>
+                    </form>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
