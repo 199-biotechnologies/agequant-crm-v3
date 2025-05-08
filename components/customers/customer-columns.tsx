@@ -106,17 +106,33 @@ function CustomerActionsCell({ customer }: { customer: Customer }) {
 // TODO: Refine this type based on actual Supabase schema if needed (e.g., nullability)
 export type Customer = {
   id: string // UUID
+  customer_code: string | null // Can be null if backfill hasn't run or for some edge cases
   company_contact_name: string
-  email: string
+  email: string | null // Now optional
   phone: string | null
-  preferred_currency: string
-  address: string
+  preferred_currency: string | null // Now optional
+  address: string | null // Now optional
   notes: string | null
   created_at: string // ISO timestamp string
   updated_at: string // ISO timestamp string
 }
 
 export const CustomerColumns: ColumnDef<Customer>[] = [
+  {
+    accessorKey: "customer_code",
+    header: ({ column }) => {
+      return (
+        <Button
+          variant="ghost"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Code
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
+      )
+    },
+    cell: ({ row }) => <div className="font-mono">{row.getValue("customer_code") || "-"}</div>,
+  },
   {
     accessorKey: "company_contact_name",
     header: ({ column }) => {

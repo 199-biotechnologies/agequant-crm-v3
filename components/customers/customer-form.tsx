@@ -25,10 +25,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { customerFormSchema, type CustomerFormData } from "./customer-form-schema"
+import { customerFormSchema, type CustomerFormData, allowedCurrencies } from "./customer-form-schema"
 
-// Extract allowed currencies from the schema for the dropdown
-const allowedCurrencies = customerFormSchema.shape.preferred_currency._def.values;
+// allowedCurrencies is now imported directly
 
 interface CustomerFormProps {
   initialData?: Partial<CustomerFormData>;

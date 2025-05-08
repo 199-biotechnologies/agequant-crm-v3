@@ -97,7 +97,7 @@ export async function createCustomer(data: CustomerFormData) {
     company_contact_name: validatedFields.data.company_contact_name,
     email: validatedFields.data.email,
     phone: validatedFields.data.phone || null,
-    preferred_currency: validatedFields.data.preferred_currency,
+    preferred_currency: validatedFields.data.preferred_currency || 'USD', // Default to USD if not provided
     address: validatedFields.data.address,
     notes: validatedFields.data.notes || null,
   };

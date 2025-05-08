@@ -54,8 +54,8 @@ export default async function ViewCustomerPage({ params }: ViewCustomerPageProps
 
       <Card>
         <CardHeader>
-          <CardTitle>{customer.company_contact_name}</CardTitle>
-          <CardDescription>ID: {customer.id}</CardDescription>
+          <CardTitle>{customer.company_contact_name} <Badge variant="secondary" className="ml-2 font-mono">{customer.customer_code || 'N/A'}</Badge></CardTitle>
+          <CardDescription>Internal ID: {customer.id}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
