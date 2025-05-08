@@ -1,7 +1,7 @@
 // app/customers/[id]/page.tsx
 import { cookies } from 'next/headers'; // Import cookies
 import { notFound } from 'next/navigation';
-import { createClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server"; // Import the updated helper
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge"; // Assuming you might want badges, e.g., for currency
 
@@ -16,7 +16,7 @@ function formatDisplayValue(value: string | null | undefined): string {
 
 export default async function ViewCustomerPage({ params }: ViewCustomerPageProps) {
   const cookieStore = cookies(); // Get cookie store
-  const supabase = createClient(); // Calls cookies() internally
+  const supabase = createSupabaseServerClient(cookieStore); // Pass cookie store
   const customerId = params.id;
 
   // Fetch customer data

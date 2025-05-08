@@ -1,13 +1,14 @@
 // app/customers/page.tsx
+import { cookies } from 'next/headers'; // Import cookies
 import { DataTable } from "@/components/ui/data-table"
 import { CustomerColumns, type Customer } from "@/components/customers/customer-columns"
-import { createClient } from "@/lib/supabase/server"; // Import the original helper name
+import { createSupabaseServerClient } from "@/lib/supabase/server"; // Import the updated helper
 
 // This page is now implicitly a Server Component due to async/await
 export default async function CustomersPage() {
+  const cookieStore = cookies(); // Get cookie store
   // Create a Supabase client instance specifically for this server component request
-  // createClient calls cookies() internally now
-  const supabase = createClient();
+  const supabase = createSupabaseServerClient(cookieStore); // Pass cookie store
 
   // Fetch customer data
   // Ensure RLS policies allow reads for the 'anon' key or authenticated user

@@ -3,7 +3,7 @@
 
 import { revalidatePath } from "next/cache";
 import { cookies } from 'next/headers'; // Import cookies
-import { createClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server"; // Import the updated helper
 import { redirect } from 'next/navigation';
 import { z } from "zod";
 import { customerFormSchema, type CustomerFormData } from "@/components/customers/customer-form-schema"; // Import schema and type
@@ -15,7 +15,7 @@ const DeleteCustomerSchema = z.object({
 
 export async function deleteCustomer(formData: FormData) {
   const cookieStore = cookies(); // Get cookie store
-  const supabase = createClient(); // Calls cookies() internally
+  const supabase = createSupabaseServerClient(cookieStore); // Pass cookie store
 
   const validatedFields = DeleteCustomerSchema.safeParse({
     id: formData.get('customerId'),
@@ -56,7 +56,7 @@ export async function deleteCustomer(formData: FormData) {
 // New Server Action for creating a customer
 export async function createCustomer(data: CustomerFormData) {
   const cookieStore = cookies(); // Get cookie store
-  const supabase = createClient(); // Calls cookies() internally
+  const supabase = createSupabaseServerClient(cookieStore); // Pass cookie store
 
   // Validate the data again on the server side (optional but recommended)
   const validatedFields = customerFormSchema.safeParse(data);

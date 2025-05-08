@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { CustomerForm } from "@/components/customers/customer-form";
 import { type CustomerFormData } from "@/components/customers/customer-form-schema";
 import { cookies } from 'next/headers'; // Import cookies
-import { createClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server"; // Import the updated helper
 
 interface EditCustomerPageProps {
   params: { id: string };
@@ -12,7 +12,7 @@ interface EditCustomerPageProps {
 
 export default async function EditCustomerPage({ params }: EditCustomerPageProps) {
   const cookieStore = cookies(); // Get cookie store
-  const supabase = createClient(); // Calls cookies() internally
+  const supabase = createSupabaseServerClient(cookieStore); // Pass cookie store
   const customerId = params.id;
 
   // Fetch existing customer data
@@ -36,7 +36,9 @@ export default async function EditCustomerPage({ params }: EditCustomerPageProps
     "use server";
 
     // No need to get cookieStore again if createClient handles it
-    const supabase = createClient(); // Calls cookies() internally
+    // Server Actions run in their own context, need to get cookies again
+    const cookieStore = cookies();
+    const supabase = createSupabaseServerClient(cookieStore);
 
     // Prepare data for update (handle optional fields)
     const customerData = {
