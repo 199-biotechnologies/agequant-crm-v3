@@ -6,9 +6,19 @@ ADD COLUMN public_customer_id TEXT;
 -- This will also help with performance of lookups if needed
 CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_public_customer_id ON customers (public_customer_id);
 
+-- Drop existing function and trigger first to ensure clean state (if they exist)
+DROP TRIGGER IF EXISTS set_public_customer_id_trigger ON customers;
+DROP FUNCTION IF EXISTS set_public_customer_id();
+DROP FUNCTION IF EXISTS generate_public_customer_id();
+-- Also drop potential old named ones just in case
+DROP TRIGGER IF EXISTS set_customer_code_trigger ON customers;
+DROP FUNCTION IF EXISTS set_customer_code();
+DROP FUNCTION IF EXISTS generate_customer_code();
+
+
 -- Function to generate a 5-character alphanumeric code
 -- 3 random digits and 2 random uppercase letters, shuffled
-CREATE OR REPLACE FUNCTION generate_public_customer_id()
+CREATE FUNCTION generate_public_customer_id() -- Use CREATE instead of CREATE OR REPLACE after explicit DROP
 RETURNS TEXT AS $$
 DECLARE
     -- Excluding I, L, O for readability
@@ -73,7 +83,7 @@ END;
 $$ LANGUAGE plpgsql VOLATILE;
 
 -- Trigger function to set public_customer_id on new customer insert
-CREATE OR REPLACE FUNCTION set_public_customer_id()
+CREATE FUNCTION set_public_customer_id() -- Use CREATE instead of CREATE OR REPLACE after explicit DROP
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.public_customer_id := generate_public_customer_id();
