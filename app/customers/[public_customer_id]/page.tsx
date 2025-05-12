@@ -1,9 +1,9 @@
 // Will be renamed to: app/customers/[public_customer_id]/page.tsx
-import { cookies } from 'next/headers'; // Import cookies
-import { notFound } from 'next/navigation';
-import { createServerClient, type CookieOptions } from '@supabase/ssr' // Import directly
-// No longer importing the helper
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+ import { cookies } from 'next/headers'; // Import cookies
+ import { notFound } from 'next/navigation';
+ import { createServerClient } from '@supabase/ssr' // Import directly, removed CookieOptions
+ // No longer importing the helper
+ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge"; // Assuming you might want badges, e.g., for currency
 
 interface ViewCustomerPageProps {

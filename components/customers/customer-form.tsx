@@ -32,8 +32,9 @@ import { customerFormSchema, type CustomerFormData, allowedCurrencies } from "./
 interface CustomerFormProps {
   // initialData might need to include the public ID if we are editing
   initialData?: Partial<CustomerFormData> & { public_customer_id?: string | null }; // Keep initialData structure
-  // Replace onSubmit with serverAction prop
-  serverAction: (formData: FormData) => Promise<void | { error?: string; fieldErrors?: any }>;
+  // Server action for <form action>. It should typically return void or Promise<void>.
+  // Error/state handling is often done via useFormState in the parent component.
+  serverAction: (formData: FormData) => void | Promise<void>;
 }
 
 export function CustomerForm({ initialData, serverAction }: CustomerFormProps) {

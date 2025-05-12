@@ -1,20 +1,29 @@
-// Path: app/customers/[id]/edit/page.tsx (where [id] is public_customer_id)
-import { notFound, redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
-import { CustomerForm } from "@/components/customers/customer-form";
-import { type CustomerFormData } from "@/components/customers/customer-form-schema";
+ // Path: app/customers/[id]/edit/page.tsx (where [id] is public_customer_id)
+ import { notFound } from 'next/navigation'; // Removed redirect
+ // Removed revalidatePath
+ // Removed React import as it's not strictly needed for this Server Component
+ import { CustomerForm } from "@/components/customers/customer-form";
+ import { type CustomerFormData } from "@/components/customers/customer-form-schema";
 import { updateCustomer } from '@/app/customers/actions'; // Import the update action
 import { cookies } from 'next/headers';
 import { createServerClient, type CookieOptions } from '@supabase/ssr' // Import directly
 // Removed duplicate imports
 
+
+// Properly typed props for dynamic route pages
+interface PageParams {
+  public_customer_id: string;
+}
+
 interface EditCustomerPageProps {
-  params: { id: string }; // This 'id' is the public_customer_id from the route
+  params: PageParams;
+  searchParams?: { [key: string]: string | string[] | undefined };
 }
 
 export default async function EditCustomerPage({ params }: EditCustomerPageProps) {
-  // Explicitly await the cookie store
-  const cookieStore = await cookies();
+  const { public_customer_id } = params; // Destructure here
+  // No need to await cookies() as it's synchronous
+  const cookieStore = cookies();
   // Create client directly within the Server Component
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -27,13 +36,13 @@ export default async function EditCustomerPage({ params }: EditCustomerPageProps
       },
     }
   );
-  const publicCustomerId = params.id; // Treat the param as the public ID
+  // const publicCustomerId = params.id; // Use the destructured prop
 
   // Fetch existing customer data using public_customer_id
   const { data: customer, error: fetchError } = await supabase
     .from('customers')
     .select('*') // Select all fields including the internal UUID 'id'
-    .eq('public_customer_id', publicCustomerId) // Query by the public ID
+    .eq('public_customer_id', public_customer_id) // Query by the destructured prop
     .maybeSingle(); // Use maybeSingle() as the customer might not exist
 
   if (fetchError) {
@@ -47,7 +56,7 @@ export default async function EditCustomerPage({ params }: EditCustomerPageProps
 
   // Bind the publicCustomerId to the updateCustomer server action
   // The form action will only pass FormData, so the first arg (publicCustomerId) needs to be bound here.
-  const updateCustomerWithId = updateCustomer.bind(null, publicCustomerId);
+  const updateCustomerWithId = updateCustomer.bind(null, public_customer_id); // Bind the destructured prop
 
   // Map fetched data to form data structure (adjust if needed)
   const initialFormData: Partial<CustomerFormData> = {

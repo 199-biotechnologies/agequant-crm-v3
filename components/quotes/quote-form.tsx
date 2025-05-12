@@ -24,19 +24,15 @@ import { toast } from "@/components/ui/use-toast";
 import {
   getAppSettings,
   getIssuingEntities,
-  getPaymentSources,
 } from "@/app/settings/actions";
 import {
   type AppSettings,
   type IssuingEntity,
-  type PaymentSource,
   ALLOWED_CURRENCIES
 } from "@/app/settings/types";
-// Import the specific data types from actions.ts
-import { type DbInvoiceData, type DbInvoiceLineItem } from "@/app/invoices/actions";
+import { type DbQuoteData, type DbQuoteLineItem } from "@/app/quotes/actions";
 
-// TODO: Import actual customer/product fetching actions and types when available
-// For now, using placeholder types and functions
+// TODO: Import actual customer/product fetching actions and types
 type Customer = { id: string; name: string; preferred_currency?: string | null };
 type Product = { id: string; sku: string; name: string; description: string | null; base_price: number; unit: string; status: string };
 async function getCustomers(): Promise<Customer[]> { console.warn("getCustomers not implemented, returning mock data."); return [{ id: "cust_1", name: "Placeholder Customer 1" }, { id: "cust_2", name: "Placeholder Customer 2" }]; }
@@ -45,7 +41,7 @@ async function getProducts(): Promise<Product[]> { console.warn("getProducts not
 
 // --- Schema Definition (Matches schema in actions.ts) ---
 const lineItemSchema = z.object({
-  // id: z.string().optional(), // Keep internal ID for key, but maybe not needed for validation itself
+  // id: z.string().optional(),
   productId: z.string().uuid("Invalid product ID format").min(1, "Product is required"),
   description: z.string().min(1, "Description is required").max(1000, "Description too long"),
   quantity: z.preprocess(
@@ -56,206 +52,169 @@ const lineItemSchema = z.object({
     (val) => (typeof val === 'string' ? parseFloat(val) : val),
     z.number().min(0, "Unit price cannot be negative")
   ),
-  // total is calculated client-side for display, not part of the core form data schema for submission.
-  // Removing from schema to simplify FormLineItemFields type and match map output.
-  // total: z.number().optional(),
+  // total is calculated, omit
 });
 
-const invoiceFormSchema = z.object({
+const quoteFormSchema = z.object({
   entityId: z.string().uuid("Invalid entity ID format").min(1, "Issuing Entity is required"),
   customerId: z.string().uuid("Invalid customer ID format").min(1, "Customer is required"),
   issueDate: z.string().min(1, "Issue date is required").refine(val => !isNaN(Date.parse(val)), { message: "Invalid issue date" }),
-  dueDate: z.string().min(1, "Due date is required").refine(val => !isNaN(Date.parse(val)), { message: "Invalid due date" }),
+  expiryDate: z.string().min(1, "Expiry date is required").refine(val => !isNaN(Date.parse(val)), { message: "Invalid expiry date" }),
   currency: z.string().length(3, "Currency code must be 3 letters").min(1, "Currency is required"),
-  paymentSourceId: z.string().uuid("Invalid payment source ID format").min(1, "Payment source is required"),
+  discountPercent: z.preprocess(
+    (val) => (typeof val === 'string' ? parseFloat(val) : val),
+    z.number().min(0).max(100).optional().default(0)
+  ),
   taxPercent: z.preprocess(
     (val) => (typeof val === 'string' ? parseFloat(val) : val),
     z.number().min(0, "Tax cannot be negative").max(100, "Tax cannot exceed 100%").default(0)
   ),
-  notes: z.string().max(2000, "Notes too long").optional(),
+  notes: z.string().max(2000, "Notes/Terms too long").optional(),
   lineItems: z.array(lineItemSchema).min(1, "At least one line item is required"),
 });
 
-type InvoiceFormValues = z.infer<typeof invoiceFormSchema>;
+type QuoteFormValues = z.infer<typeof quoteFormSchema>;
 
 // Type for line items as expected by the form's Zod schema (derived from local schema)
 type FormLineItemFields = z.infer<typeof lineItemSchema>;
 
-
-// Type for the initialData prop is now directly DbInvoiceData
-type InitialInvoiceData = DbInvoiceData;
-
+// Type for the initialData prop is now directly DbQuoteData
+type InitialQuoteData = DbQuoteData;
 
 // --- Helper Functions ---
-// (Keep calculateDueDate and generatePaymentInstructions helpers as they are)
-function calculateDueDate(issueDateStr: string, paymentTermsDays: number | null | undefined): string {
+// (Keep calculateExpiryDate helper as is)
+function calculateExpiryDate(issueDateStr: string, expiryDays: number | null | undefined): string {
   try {
     const issueDate = new Date(issueDateStr);
-    const days = paymentTermsDays ?? 30; // Default to 30 days if not set
+    const days = expiryDays ?? 30; // Default to 30 days if not set
     issueDate.setDate(issueDate.getDate() + days);
     return format(issueDate, 'yyyy-MM-dd');
   } catch (e) {
-    console.error("Error calculating due date:", e);
+    console.error("Error calculating expiry date:", e);
     const fallbackDate = new Date();
     fallbackDate.setDate(fallbackDate.getDate() + 30);
     return format(fallbackDate, 'yyyy-MM-dd');
   }
 }
 
-function generatePaymentInstructions(source: PaymentSource | null | undefined): string {
-  if (!source) return "Payment details not available. Please select a valid payment source.";
-  let instructions = `Payment Method: ${source.name}\n`;
-  if (source.bank_name) instructions += `Bank: ${source.bank_name}\n`;
-  if (source.account_holder_name) instructions += `Account Name: ${source.account_holder_name}\n`;
-  if (source.account_number) instructions += `Account #: ${source.account_number}\n`;
-  if (source.iban) instructions += `IBAN: ${source.iban}\n`;
-  if (source.swift_bic) instructions += `SWIFT/BIC: ${source.swift_bic}\n`;
-  if (source.routing_number_us) instructions += `Routing (US): ${source.routing_number_us}\n`;
-  if (source.sort_code_uk) instructions += `Sort Code (UK): ${source.sort_code_uk}\n`;
-  if (source.additional_details) instructions += `\n${source.additional_details}\n`;
-  return instructions.trim();
-}
-
-
 // --- Component ---
-interface InvoiceFormProps {
-  initialData?: InitialInvoiceData | null;
-  onSubmitAction: (formData: FormData) => Promise<{ error?: string }>; // Server action for submission
+interface QuoteFormProps {
+  initialData?: InitialQuoteData | null;
+  onSubmitAction: (formData: FormData) => Promise<{ error?: string }>;
 }
 
-export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormProps) {
-  const [isLoading, setIsLoading] = useState(true); // Still needed for fetching lists
+export function QuoteForm({ initialData = null, onSubmitAction }: QuoteFormProps) {
+  const [isLoading, setIsLoading] = useState(true); // For fetching lists
   const [error, setError] = useState<string | null>(null);
-  const [appSettings, setAppSettings] = useState<AppSettings | null>(null); // Keep for defaults
-  const [issuingEntities, setIssuingEntities] = useState<IssuingEntity[]>([]); // Keep for dropdown
-  const [paymentSources, setPaymentSources] = useState<PaymentSource[]>([]); // Keep for dropdown
-  const [customers, setCustomers] = useState<Customer[]>([]); // Keep for dropdown
-  const [products, setProducts] = useState<Product[]>([]); // Keep for dropdown
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null); // For defaults
+  const [issuingEntities, setIssuingEntities] = useState<IssuingEntity[]>([]); // For dropdown
+  const [customers, setCustomers] = useState<Customer[]>([]); // For dropdown
+  const [products, setProducts] = useState<Product[]>([]); // For dropdown
 
   // --- Form Initialization ---
-  const form = useForm<InvoiceFormValues>({
-    resolver: zodResolver(invoiceFormSchema),
+  const form = useForm<QuoteFormValues>({
+    resolver: zodResolver(quoteFormSchema),
     /* eslint-disable @typescript-eslint/no-explicit-any */
     defaultValues: useMemo(() => {
-      let mappedLineItems: FormLineItemFields[];
-      if (initialData && initialData.line_items && Array.isArray(initialData.line_items)) {
-        // Explicitly type initialData.line_items before mapping
-        const dbLineItems: DbInvoiceLineItem[] = initialData.line_items as DbInvoiceLineItem[];
-        mappedLineItems = dbLineItems.map((item: DbInvoiceLineItem): FormLineItemFields => ({
-          productId: item.product_id || "",
-          description: item.description || "",
-          quantity: item.quantity || 1,
-          unitPrice: item.unit_price || 0,
-        }));
-      } else {
-        mappedLineItems = [{ productId: "", description: "", quantity: 1, unitPrice: 0 }];
-      }
-
       if (initialData) {
+        // Map initialData (from DB) to form values
         return {
           entityId: initialData.issuing_entity_id || "",
           customerId: initialData.customer_id || "",
           issueDate: initialData.issue_date ? format(parseISO(initialData.issue_date), 'yyyy-MM-dd') : "",
-          dueDate: initialData.due_date ? format(parseISO(initialData.due_date), 'yyyy-MM-dd') : "",
+          expiryDate: initialData.expiry_date ? format(parseISO(initialData.expiry_date), 'yyyy-MM-dd') : "",
           currency: initialData.currency_code || "USD",
-          paymentSourceId: initialData.payment_source_id || "",
+          discountPercent: initialData.discount_percentage ?? 0,
           taxPercent: initialData.tax_percentage ?? 0,
           notes: initialData.notes || "",
-          lineItems: mappedLineItems.length > 0 ? mappedLineItems : [{ productId: "", description: "", quantity: 1, unitPrice: 0 }],
+          lineItems: (initialData.line_items as DbQuoteLineItem[] | undefined | null)?.map(
+            (item: DbQuoteLineItem): FormLineItemFields => ({
+              productId: item.product_id || "",
+              description: item.description || "",
+              quantity: item.quantity || 1,
+              unitPrice: item.unit_price || 0,
+            })
+          ) || [{ productId: "", description: "", quantity: 1, unitPrice: 0 }],
         };
       } else {
+        // Default values for a *new* quote (refined by useEffect)
         return {
           entityId: "",
           customerId: "",
           issueDate: format(new Date(), 'yyyy-MM-dd'),
-          dueDate: format(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd'),
+          expiryDate: format(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd'),
           currency: "USD",
-          paymentSourceId: "",
+          discountPercent: 0,
           taxPercent: 0,
           notes: "",
-          lineItems: [{ productId: "", description: "", quantity: 1, unitPrice: 0 }], // Default for new
+          lineItems: [{ productId: "", description: "", quantity: 1, unitPrice: 0 }],
         };
       }
     }, [initialData]),
     /* eslint-enable @typescript-eslint/no-explicit-any */
   });
 
-  // useFieldArray's 'fields' will have 'id' (for React key) + properties from defaultValues/appended items
-  // The 'total' property for display can be added when appending or calculated in render
   const { fields, append, remove } = useFieldArray({
     control: form.control,
     name: "lineItems",
   });
 
-  // --- Data Fetching for Dropdowns & Defaults (runs on mount) ---
+  // --- Data Fetching for Dropdowns & Defaults ---
   useEffect(() => {
-    let isMounted = true; // Prevent state updates on unmounted component
+    let isMounted = true;
     async function loadDropdownDataAndDefaults() {
       setIsLoading(true);
       setError(null);
       try {
-        // Explicitly type the results of Promise.all
         const [
           settings,
           entities,
-          sources,
           fetchedCustomers,
           fetchedProducts
         ]: [
           AppSettings | null,
           IssuingEntity[],
-          PaymentSource[],
           Customer[],
           Product[]
         ] = await Promise.all([
           getAppSettings(),
           getIssuingEntities(),
-          getPaymentSources(),
-          getCustomers(), // Mock function returns Promise<Customer[]>
-          getProducts(),  // Mock function returns Promise<Product[]>
+          getCustomers(),
+          getProducts(),
         ]);
 
-        if (!isMounted) return; // Exit if component unmounted
+        if (!isMounted) return;
 
         setAppSettings(settings);
         setIssuingEntities(entities);
-        setPaymentSources(sources);
         setCustomers(fetchedCustomers);
         setProducts(fetchedProducts);
 
-        // --- Set Defaults ONLY IF creating a NEW invoice (no initialData) ---
+        // Set Defaults ONLY IF creating a NEW quote
         if (!initialData) {
           const primaryEntity = entities.find(e => e.is_primary) || entities[0];
-          const defaultPaymentTerms = settings?.default_invoice_payment_terms_days;
+          const defaultExpiryDays = settings?.default_quote_expiry_days;
           const defaultTax = settings?.default_tax_percentage;
-          const defaultNotes = settings?.default_invoice_notes;
+          const defaultNotes = settings?.default_quote_notes;
           const baseCurrency = settings?.base_currency || "USD";
 
           const today = format(new Date(), 'yyyy-MM-dd');
-          const initialDueDate = calculateDueDate(today, defaultPaymentTerms);
+          const initialExpiryDate = calculateExpiryDate(today, defaultExpiryDays);
 
-          let initialPaymentSourceId = "";
-          if (primaryEntity) {
-            const primarySourceForEntity = sources.find(s => s.issuing_entity_id === primaryEntity.id && s.is_primary_for_entity);
-            initialPaymentSourceId = primarySourceForEntity?.id || sources.find(s => s.issuing_entity_id === primaryEntity.id)?.id || "";
-          }
-
-          // Use reset to update defaults for a new form, preserving any user input if needed
-          // Or use setValue for specific fields if reset is too broad
           form.reset({
-            ...form.getValues(), // Keep existing values (like line items if user added one)
-            entityId: form.getValues('entityId') || primaryEntity?.id || "", // Only set if not already set
+            ...form.getValues(),
+            entityId: form.getValues('entityId') || primaryEntity?.id || "",
             issueDate: form.getValues('issueDate') || today,
-            dueDate: form.getValues('dueDate') || initialDueDate,
+            expiryDate: form.getValues('expiryDate') || initialExpiryDate,
             currency: form.getValues('currency') || baseCurrency,
-            paymentSourceId: form.getValues('paymentSourceId') || initialPaymentSourceId,
             taxPercent: form.getValues('taxPercent') ?? defaultTax ?? 0,
             notes: form.getValues('notes') || defaultNotes || "",
-          }, { keepDefaultValues: false }); // Ensure defaultValues are updated
+            discountPercent: form.getValues('discountPercent') ?? 0,
+          }, { keepDefaultValues: false });
         }
 
       } catch (e) {
-        console.error("Failed to load initial data for invoice form:", e);
+        console.error("Failed to load initial data for quote form:", e);
         if (isMounted) {
           setError("Failed to load required data. Please try again later.");
           toast({ title: "Error", description: "Could not load necessary data.", variant: "destructive" });
@@ -264,58 +223,41 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
         if (isMounted) setIsLoading(false);
       }
     }
-
     loadDropdownDataAndDefaults();
-
-    return () => { isMounted = false; }; // Cleanup function
+    return () => { isMounted = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialData, form.reset, form.getValues]); // Depend on initialData to know if it's create/edit
-
+  }, [initialData, form.reset, form.getValues]);
 
   // --- Watched Values & Derived State ---
   // (Keep watched values and derived state logic as is)
   const watchedLineItems = form.watch("lineItems");
   const watchedTaxPercent = form.watch("taxPercent");
-  const watchedCurrency = form.watch("currency"); // Keep watching currency
-  const watchedEntityId = form.watch("entityId");
-  const watchedPaymentSourceId = form.watch("paymentSourceId");
+  const watchedDiscountPercent = form.watch("discountPercent");
+  const watchedCurrency = form.watch("currency");
   const watchedIssueDate = form.watch("issueDate");
 
   const subtotal = useMemo(() => watchedLineItems.reduce((sum, item) => sum + ((item.quantity || 0) * (item.unitPrice || 0)), 0), [watchedLineItems]);
-  const taxAmount = useMemo(() => subtotal * ((watchedTaxPercent || 0) / 100), [subtotal, watchedTaxPercent]);
-  const total = useMemo(() => subtotal + taxAmount, [subtotal, taxAmount]);
+  const discountAmount = useMemo(() => subtotal * ((watchedDiscountPercent || 0) / 100), [subtotal, watchedDiscountPercent]);
+  const subtotalAfterDiscount = useMemo(() => subtotal - discountAmount, [subtotal, discountAmount]);
+  const taxAmount = useMemo(() => subtotalAfterDiscount * ((watchedTaxPercent || 0) / 100), [subtotalAfterDiscount, watchedTaxPercent]);
+  const total = useMemo(() => subtotalAfterDiscount + taxAmount, [subtotalAfterDiscount, taxAmount]);
 
-  const selectedPaymentSource = useMemo(() => paymentSources.find(ps => ps.id === watchedPaymentSourceId), [paymentSources, watchedPaymentSourceId]);
-  const paymentInstructions = useMemo(() => generatePaymentInstructions(selectedPaymentSource), [selectedPaymentSource]);
+  // --- Effects ---
+  // Update line item totals effect removed as total is display-only
 
-  // --- Effects for Form Logic ---
-  // Update line item totals effect can be removed if 'total' is purely display and calculated in render/memo
-
-  // Update payment source options effect (keep as is)
+  // Recalculate expiry date effect (keep, but only for new quotes)
   useEffect(() => {
-    const currentSource = paymentSources.find(ps => ps.id === form.getValues("paymentSourceId"));
-    if (currentSource?.issuing_entity_id !== watchedEntityId) {
-      const firstValidSourceForEntity = paymentSources.find(ps => ps.issuing_entity_id === watchedEntityId && ps.is_primary_for_entity)
-                                      || paymentSources.find(ps => ps.issuing_entity_id === watchedEntityId);
-      form.setValue("paymentSourceId", firstValidSourceForEntity?.id || "", { shouldValidate: true });
-    }
-  }, [watchedEntityId, paymentSources, form]);
-
-  // Recalculate due date effect (keep as is, but only if creating new)
-  useEffect(() => {
-    // Only recalculate due date based on defaults if it's a new invoice
     if (!initialData && watchedIssueDate) {
-      const defaultPaymentTerms = appSettings?.default_invoice_payment_terms_days;
-      const newDueDate = calculateDueDate(watchedIssueDate, defaultPaymentTerms);
-      if (newDueDate !== form.getValues('dueDate')) {
-          form.setValue('dueDate', newDueDate, { shouldValidate: true });
+      const defaultExpiryDays = appSettings?.default_quote_expiry_days;
+      const newExpiryDate = calculateExpiryDate(watchedIssueDate, defaultExpiryDays);
+      if (newExpiryDate !== form.getValues('expiryDate')) {
+          form.setValue('expiryDate', newExpiryDate, { shouldValidate: true });
       }
     }
   }, [watchedIssueDate, appSettings, form, initialData]);
 
-
   // --- Handlers ---
-  // (Keep formatCurrency and handleProductChange handlers as they are)
+  // (Keep formatCurrency and handleProductChange handlers as is)
   const formatCurrency = (amount: number) => {
     try {
        return new Intl.NumberFormat(undefined, { style: 'currency', currency: watchedCurrency || 'USD' }).format(amount);
@@ -328,7 +270,7 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
     const selectedProduct = products.find((p) => p.id === productId || p.sku === productId);
     if (selectedProduct) {
       form.setValue(`lineItems.${index}.description`, selectedProduct.description || selectedProduct.name, { shouldValidate: true });
-      // TODO: Implement multi-currency price logic here
+      // TODO: Implement multi-currency price logic
       form.setValue(`lineItems.${index}.unitPrice`, selectedProduct.base_price, { shouldValidate: true });
     }
   };
@@ -337,12 +279,10 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
   async function handleFormSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await form.handleSubmit(async (data) => {
-      console.log("Form data validated:", data);
-      // Need to pass line items correctly, FormData might stringify them
+      console.log("Quote form data validated:", data);
       const formData = new FormData();
       Object.entries(data).forEach(([key, value]) => {
         if (key === 'lineItems') {
-          // Stringify line items for FormData (server action needs to parse)
           formData.append(key, JSON.stringify(value));
         } else if (value !== null && value !== undefined) {
           formData.append(key, String(value));
@@ -351,30 +291,27 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
 
       try {
         const result = await onSubmitAction(formData);
-        // Handle result (e.g., show toast on error)
         if (result?.error) {
           toast({ title: "Submission Error", description: result.error, variant: "destructive" });
         } else {
-          toast({ title: "Success", description: `Invoice ${initialData ? 'updated' : 'created'} successfully.` });
-          // Redirect is handled by server action
+          toast({ title: "Success", description: `Quote ${initialData ? 'updated' : 'created'} successfully.` });
+          // Redirect handled by server action
         }
       } catch (error) {
-        console.error("Submission failed:", error);
+        console.error("Quote submission failed:", error);
         toast({ title: "Submission Error", description: "An unexpected error occurred.", variant: "destructive" });
       }
-    })(event); // Pass the event to RHF's handleSubmit
+    })(event);
   }
-
 
   // --- Render Logic ---
   // (Keep Skeleton and error rendering as is)
-  if (isLoading) {
+   if (isLoading) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-1/4" />
         <Card><CardContent className="pt-6 space-y-4"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></CardContent></Card>
         <Card><CardContent className="pt-6 space-y-4"><Skeleton className="h-20 w-full" /></CardContent></Card>
-        <Card><CardContent className="pt-6 space-y-4"><Skeleton className="h-16 w-full" /></CardContent></Card>
         <Card><CardContent className="pt-6 space-y-4"><Skeleton className="h-16 w-full" /></CardContent></Card>
       </div>
     );
@@ -386,17 +323,15 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
 
   return (
     <Form {...form}>
-      {/* Use handleFormSubmit which wraps RHF's handleSubmit */}
       <form onSubmit={handleFormSubmit} className="space-y-8">
         {/* Header Fields Card */}
         <Card>
           <CardContent className="pt-6">
-            {/* Keep all FormField definitions as they are */}
+            {/* Keep FormField definitions, add keys */}
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               <FormField
                 control={form.control}
                 name="entityId"
-                // Add key prop if needed for re-rendering on default value change
                 key={`entityId-${form.formState.defaultValues?.entityId}`}
                 render={({ field }) => (
                   <FormItem>
@@ -460,11 +395,11 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
               />
               <FormField
                 control={form.control}
-                name="dueDate"
-                key={`dueDate-${form.formState.defaultValues?.dueDate}`}
+                name="expiryDate"
+                key={`expiryDate-${form.formState.defaultValues?.expiryDate}`}
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Due Date <span className="text-red-500">*</span></FormLabel>
+                    <FormLabel>Expiry Date <span className="text-red-500">*</span></FormLabel>
                     <FormControl>
                       <Input type="date" {...field} value={field.value || ''} />
                     </FormControl>
@@ -491,33 +426,6 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
                             {currencyCode}
                           </SelectItem>
                         ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="paymentSourceId"
-                key={`paymentSourceId-${form.formState.defaultValues?.paymentSourceId}`}
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Payment Source <span className="text-red-500">*</span></FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select payment source" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {paymentSources
-                          .filter((source) => source.issuing_entity_id === watchedEntityId)
-                          .map((source) => (
-                            <SelectItem key={source.id} value={source.id}>
-                              {source.name} {source.is_primary_for_entity ? '(Primary)' : ''}
-                            </SelectItem>
-                          ))}
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -551,7 +459,7 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
                         <FormField
                           control={form.control}
                           name={`lineItems.${index}.productId`}
-                          key={`${field.id}-productId`} // Add key for stability
+                          key={`${field.id}-productId`}
                           render={({ field: itemField }) => (
                             <FormItem>
                               <Select
@@ -606,7 +514,7 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
                                 <Input
                                   type="number"
                                   {...itemField}
-                                  value={itemField.value ?? 1} // Use ?? for potential 0 value
+                                  value={itemField.value ?? 1}
                                   onChange={(e) => itemField.onChange(Number.parseInt(e.target.value) || 1)}
                                 />
                               </FormControl>
@@ -627,7 +535,7 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
                                   type="number"
                                   step="0.01"
                                   {...itemField}
-                                  value={itemField.value ?? 0} // Use ??
+                                  value={itemField.value ?? 0}
                                   onChange={(e) => itemField.onChange(Number.parseFloat(e.target.value) || 0)}
                                 />
                               </FormControl>
@@ -636,7 +544,6 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
                           )}
                         />
                       </TableCell>
-                      {/* Calculate total directly for display */}
                       <TableCell className="text-right">
                         {formatCurrency((watchedLineItems[index]?.quantity || 0) * (watchedLineItems[index]?.unitPrice || 0))}
                       </TableCell>
@@ -662,7 +569,6 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
               variant="outline"
               size="sm"
               className="mt-4"
-              // Ensure appended item matches schema (FormLineItemSchemaType)
               onClick={() => append({ productId: "", description: "", quantity: 1, unitPrice: 0 })}
             >
               Add Line Item
@@ -676,6 +582,40 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
                     <span>Subtotal:</span>
                     <span>{formatCurrency(subtotal)}</span>
                   </div>
+                   <div className="flex items-center justify-between">
+                     <Label htmlFor="discountPercentInput" className="mr-2 shrink-0">Discount (%):</Label>
+                    <FormField
+                      control={form.control}
+                      name="discountPercent"
+                      key={`discountPercent-${form.formState.defaultValues?.discountPercent}`}
+                      render={({ field }) => (
+                        <FormItem className="flex-grow">
+                          <FormControl>
+                            <Input
+                              id="discountPercentInput"
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              max="100"
+                              className="w-full text-right"
+                              {...field}
+                              value={field.value ?? 0}
+                              onChange={(e) => field.onChange(Number.parseFloat(e.target.value) || 0)}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                   <div className="flex justify-between text-muted-foreground text-sm">
+                     <span>Discount Amount:</span>
+                     <span>({formatCurrency(discountAmount)})</span>
+                   </div>
+                   <div className="flex justify-between font-medium">
+                     <span>Subtotal After Discount:</span>
+                     <span>{formatCurrency(subtotalAfterDiscount)}</span>
+                   </div>
                   <div className="flex items-center justify-between">
                      <Label htmlFor="taxPercentInput" className="mr-2 shrink-0">Tax (%):</Label>
                     <FormField
@@ -693,7 +633,7 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
                               max="100"
                               className="w-full text-right"
                               {...field}
-                              value={field.value ?? 0} // Use ??
+                              value={field.value ?? 0}
                               onChange={(e) => field.onChange(Number.parseFloat(e.target.value) || 0)}
                             />
                           </FormControl>
@@ -726,10 +666,10 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
               key={`notes-${form.formState.defaultValues?.notes}`}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Notes</FormLabel>
+                  <FormLabel>Notes / Terms</FormLabel>
                   <FormControl>
                     <Textarea
-                      placeholder="Enter any additional notes or information (e.g., terms, conditions)"
+                      placeholder="Enter any additional notes or terms and conditions"
                       rows={4}
                       {...field}
                       value={field.value || ''}
@@ -742,27 +682,11 @@ export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormP
           </CardContent>
         </Card>
 
-        {/* Payment Instructions Card */}
-        <Card>
-          <CardContent className="pt-6">
-            <h3 className="mb-2 text-lg font-medium">Payment Instructions</h3>
-            <div className="rounded-md bg-muted p-4">
-              <pre className="whitespace-pre-wrap text-sm font-mono">{paymentInstructions}</pre>
-            </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Instructions based on selected payment source.{" "}
-              <a href="/settings/payment-sources" className="underline" target="_blank" rel="noopener noreferrer">
-                Manage Sources
-              </a>
-            </p>
-          </CardContent>
-        </Card>
-
         {/* Submit Button */}
         <div className="flex justify-end">
           {/* TODO: Add Cancel button */}
           <Button type="submit" disabled={form.formState.isSubmitting || isLoading}>
-            {form.formState.isSubmitting ? "Saving..." : (initialData ? "Update Invoice" : "Create Invoice")}
+            {form.formState.isSubmitting ? "Saving..." : (initialData ? "Update Quote" : "Create Quote")}
           </Button>
         </div>
       </form>

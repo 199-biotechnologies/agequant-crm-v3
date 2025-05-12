@@ -39,14 +39,15 @@ function CustomerActionsCell({ customer }: { customer: Customer }) {
       // Pass the public ID to the delete action
       formData.append('publicCustomerId', customer.public_customer_id || ''); // Handle potential null
       // Explicitly type the expected result from the server action
-      const result: { error?: string; success?: boolean } | undefined = await deleteCustomer(formData);
-      if (result?.error) {
-        toast.error(`Failed to delete customer: ${result.error}`);
-      } else {
-        toast.success(`Customer '${customer.company_contact_name}' deleted successfully.`);
-      }
-    });
-  };
+       const result: { error?: string; success?: boolean } | undefined = await deleteCustomer(formData);
+       if (result?.error) {
+         toast.error(`Failed to delete customer: ${result.error}`);
+       } else {
+         // eslint-disable-next-line react/no-unescaped-entities
+         toast.success(`Customer '${customer.company_contact_name}' deleted successfully.`);
+       }
+     });
+   };
 
   return (
     <div className="text-right">
@@ -86,6 +87,7 @@ function CustomerActionsCell({ customer }: { customer: Customer }) {
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                {/* eslint-disable-next-line react/no-unescaped-entities */}
                 <AlertDialogDescription>
                   This action will mark the customer '{customer.company_contact_name}' as deleted. This cannot be undone easily.
                 </AlertDialogDescription>

@@ -110,10 +110,10 @@ This document enumerates every screen, widget and user‑editable field required
 | Field                  | Required? | Notes                      |
 | ---------------------- | --------- | -------------------------- |
 | Company / Contact Name | ✔         | Single text field          |
-| Email                  | ✔         | Used for sending PDFs      |
+| Email                  | —         | Used for sending PDFs      |
 | Phone                  | —         | Optional                   |
-| Preferred Currency     | ✔         | Dropdown (same fixed list) |
-| Address                | ✔         | Appears on PDFs            |
+| Preferred Currency     | —         | Dropdown (same fixed list) |
+| Address                | —         | Appears on PDFs            |
 | Notes                  | —         | Internal                   |
 
 ---
@@ -131,8 +131,8 @@ This document enumerates every screen, widget and user‑editable field required
 | Name                  | ✔         | Unique per account                                                                                                                          |
 | SKU                   | (auto)    | Generated after first save (`PR‑XXXXX`, 5‑char code from same set)                                                                          |
 | Unit                  | ✔         | pc · box · kit · kg · hr                                                                                                                    |
-| Base Price            | ✔         | Numeric ≥ 0 in base currency                                                                                                                |
-| **Additional Prices** | —         | Table. "Add Price" prefills price using current FX rate; user may edit. Currency dropdown limited to fixed list and must be unique per row. |
+| Base Price            | ✔         | Numeric ≥ 0 in the system's configured **Base Currency** (e.g., USD). Label should reflect the base currency.                               |
+| **Additional Prices** | —         | Optional Table. Allows setting specific fixed prices in currencies *other than* the Base Currency. Currency dropdown excludes Base Currency. |
 | Status                | ✔         | Active / Inactive                                                                                                                           |
 | Description           | —         | Markdown supported                                                                                                                          |
 
@@ -156,12 +156,15 @@ This document enumerates every screen, widget and user‑editable field required
 \--- Cross‑Cutting Logic
 
 * **Random ID generation** – 5‑char codes from characters `A‑Z` (excluding O, I) and digits `2‑9`. Front‑end requests server to ensure uniqueness.
-* **SKU generation** – Prefix `PR‑` + 5‑char code (same alphabet).
-* **Multi‑currency pricing** – Per line:
-
-  1. If Additional Price exists for chosen currency → use it.
-  2. Else: Base Price × FX rate (ECB daily).  FX rate displayed and stored as `exchange_rate` (`DECIMAL(10,6)`).  On "Add Price" in Product form, default value uses this computed conversion for convenience.  User can override.
-* **Tax %** – Single rate per document, 0–50 % inclusive.
+* **SKU generation** – Prefix `PR‑` + 5‑char code (same alphabet). Application requests unique SKU from server (e.g., `/api/ids/product_sku`).
+* **Multi-currency pricing (Product Setup):**
+    * Products have a required `base_price` stored in the system's **Base Currency** (defined in Settings, e.g., USD).
+    * Optionally, specific fixed prices can be stored in `product_additional_prices` for currencies *other than* the Base Currency.
+* **Multi-currency pricing (Invoice/Quote Line Item Usage):**
+    1. Check if an `additional_price` exists for the product in the document's currency.
+    2. **If YES:** Use the explicitly defined additional price.
+    3. **If NO (or if document currency IS the Base Currency):** Use the product's `base_price`. If the document currency is *not* the Base Currency, convert the `base_price` using an FX rate (e.g., from ECB daily feed). The FX rate used should be stored on the line item.
+* **Tax %** – Single rate per document, 0–50 % inclusive.
 * **Payment Instructions** – Pulled from selected Payment Source; read‑only.
 
 ### 9 Implementation Notes — No‑Assumption Checklist (dev‑facing)
@@ -172,9 +175,9 @@ This document enumerates every screen, widget and user‑editable field required
 4. **FX rate provider** – European Central Bank JSON feed. Endpoint `/fx?base={BASE}&target={TARGET}`. Rate captured on document save; stored per line.
 5. **Status transitions** – Quote: Draft→Sent→(Accepted | Rejected) • Invoice: Draft→Sent→(Paid | Overdue). Reverse only Sent→Draft before sending.
 6. **Soft delete** – `deleted_at` on Products & Customers; Quotes/Invoices never deleted.
-7. **Additional Prices validation** – Currency unique, price ≥ 0.01. On adding a row, UI pre‑fills conversion from Base Price.
-8. **Tax % field** – Accepts 0–50 %, `DECIMAL(5,2)`.
-9. **Max string lengths** – Names 120 chars; Notes 2 000 chars; Description 10 000 chars.
+7. **Additional Prices validation** – Currency unique per product (and not the Base Currency), price ≥ 0.01.
+8. **Tax % field** – Accepts 0–50 %, `DECIMAL(5,2)`.
+9. **Max string lengths** – Names 120 chars; Notes 2 000 chars; Description 10 000 chars.
 
 
 **Suggested React routes (covering full CRUD + lists):**
@@ -185,7 +188,7 @@ This document enumerates every screen, widget and user‑editable field required
 | **Invoices**  | `/invoices`                                                                                                            | `/invoices/new`  | `/invoices/:id`  | `/invoices/:id/edit`  |
 | **Quotes**    | `/quotes`                                                                                                              | `/quotes/new`    | `/quotes/:id`    | `/quotes/:id/edit`    |
 | **Customers** | `/customers`                                                                                                           | `/customers/new` | `/customers/:id` | `/customers/:id/edit` |
-| **Products**  | `/products`                                                                                                            | `/products/new`  | `/products/:id`  | `/products/:id/edit`  |
+| **Products**  | `/products`                                                                                                            | `/products/new`  | `/products/:sku` | `/products/:sku/edit` |
 | **Settings**  | `/settings` (routes as tabs) → <br>• `/settings/entities` <br>• `/settings/payment-sources` <br>• `/settings/defaults` |                  |                  |                       |
 
 **Notes**

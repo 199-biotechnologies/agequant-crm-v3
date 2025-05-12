@@ -5,11 +5,11 @@ import { revalidatePath } from "next/cache";
 import { cookies } from 'next/headers';
 import { createServerClient, type CookieOptions } from '@supabase/ssr' // Import directly
 // No longer importing the helper
-import { redirect } from 'next/navigation'; // Keep redirect for createCustomer
-import { z } from "zod";
-import { customerFormSchema, type CustomerFormData } from "@/components/customers/customer-form-schema"; // Import schema and type
+ import { redirect } from 'next/navigation'; // Keep redirect for createCustomer
+ import { z } from "zod";
+ import { customerFormSchema } from "@/components/customers/customer-form-schema"; // Import schema and type, removed CustomerFormData
 
-// Schema for validating the public customer ID (short code)
+ // Schema for validating the public customer ID (short code)
 const DeleteCustomerSchema = z.object({
   publicCustomerId: z.string().min(1, { message: "Customer ID is required." }), // Basic validation, DB handles format/uniqueness
 });

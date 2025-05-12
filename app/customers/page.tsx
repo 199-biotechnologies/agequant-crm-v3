@@ -1,8 +1,8 @@
-// app/customers/page.tsx
-import { cookies } from 'next/headers';
-import { createServerClient, type CookieOptions } from '@supabase/ssr' // Import directly
-// DataTable will be used by the client wrapper
-import { CustomerColumns } from "@/components/customers/customer-columns"
+ // app/customers/page.tsx
+ import { cookies } from 'next/headers';
+ import { createServerClient } from '@supabase/ssr' // Import directly, removed CookieOptions
+ // DataTable will be used by the client wrapper
+ import { CustomerColumns } from "@/components/customers/customer-columns"
 import { CustomerDataTableClientWrapper } from "@/components/customers/customer-data-table-client-wrapper";
 // No longer importing the helper
 

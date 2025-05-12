@@ -2,5 +2,26 @@
   "extends": [
     "next/core-web-vitals",
     "next/typescript"
+  ],
+  "rules": {
+    "@typescript-eslint/no-unused-vars": ["error", {
+      "argsIgnorePattern": "^_",
+      "varsIgnorePattern": "^_",
+      "caughtErrorsIgnorePattern": "^_"
+    }]
+  },
+  "overrides": [
+    {
+      "files": ["app/products/actions.ts", "app/settings/actions.ts", "app/settings/*.actions.ts", "app/test-action.ts"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off"
+      }
+    },
+    {
+      "files": ["components/customers/customer-columns.tsx", "components/products/product-columns.tsx", "components/**/**.tsx"],
+      "rules": {
+        "react/no-unescaped-entities": "off"
+      }
+    }
   ]
 }

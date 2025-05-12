@@ -12,7 +12,7 @@ This project is built with Next.js and TypeScript, utilizing Tailwind CSS for st
 *   **Invoice Management:** Create, view, edit, and manage invoices. Track status (Draft, Sent, Paid, Overdue).
 *   **Quote Management:** Create, view, edit, and manage quotes. Track status (Draft, Sent, Accepted, Rejected) and convert quotes to invoices.
 *   **Customer Management:** Maintain a database of customers with relevant contact and financial information.
-*   **Product Management:** Manage a catalog of products and services with pricing information.
+*   **Product Management:** Manage a catalog of products and services. Includes a base price (in the system's base currency) and optional, specific prices for other currencies.
 *   **Settings:** Configure issuing entities, payment sources, default terms, and notes.
 *   **Responsive Design:** Accessible and usable across various devices.
 
