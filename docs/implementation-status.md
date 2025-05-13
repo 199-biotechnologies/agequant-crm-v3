@@ -80,6 +80,8 @@ From a user perspective, the application has been significantly improved but sti
    - Added missing status values to database CHECK constraints
    - Standardized field naming between frontend and database
    - Added documentation for schema alignment
+   - Added missing deleted_at columns to invoices and quotes tables for soft deletion support
+   - Made dashboard queries resilient to handle existing/missing columns
 2. **✅ Error Handling**: Implemented comprehensive error handling system:
    - Enhanced error types and severity levels
    - Context-aware error messaging

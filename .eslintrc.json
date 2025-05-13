@@ -12,7 +12,7 @@
   },
   "overrides": [
     {
-      "files": ["app/*/actions.ts", "app/settings/*.actions.ts", "app/test-action.ts", "lib/utils/*.ts"],
+      "files": ["app/*/actions.ts", "app/*/revenue-data.ts", "app/settings/*.actions.ts", "app/test-action.ts", "lib/utils/*.ts"],
       "rules": {
         "@typescript-eslint/no-explicit-any": "off"
       }
