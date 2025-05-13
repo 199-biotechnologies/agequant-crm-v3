@@ -5,9 +5,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { format } from 'date-fns';
-import type { PaymentSource } from "@/app/settings/types"; // Import PaymentSource type
-
-// TODO: Import ActionButtons and configure for Invoice View context
+import type { PaymentSource } from "@/app/settings/types";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { DocumentStatusUpdater } from "@/components/shared/document-status-updater";
 
 // Define a type for individual line items based on expected data
 interface InvoiceLineItem {
@@ -91,9 +92,19 @@ export default async function InvoiceViewPage({ params }: { params: { id: string
         <h1 className="text-3xl font-bold tracking-tight">
           Invoice {invoice.invoice_number || `#${id.substring(0, 6)}...`} {/* Display invoice number if available */}
         </h1>
-        {/* TODO: Add ActionButtons component here, configured for Invoice View */}
-        {/* <ActionButtons context="invoiceView" invoiceId={id} status={invoice.status} /> */}
-        <div>Edit Button Placeholder</div>
+        <div className="flex gap-2">
+          {/* Edit button */}
+          <Button asChild variant="outline">
+            <Link href={`/invoices/${id}/edit`}>Edit</Link>
+          </Button>
+          
+          {/* Status management */}
+          <DocumentStatusUpdater 
+            id={id} 
+            currentStatus={invoice.status || 'Draft'} 
+            type="invoice" 
+          />
+        </div>
       </div>
 
       {/* Invoice Details Card */}

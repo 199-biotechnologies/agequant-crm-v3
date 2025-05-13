@@ -1,19 +1,50 @@
 import { notFound } from 'next/navigation';
-import { getInvoiceById, updateInvoice } from '@/app/invoices/actions';
+import { getInvoiceById } from '@/app/invoices/actions';
 import { InvoiceForm } from '@/components/invoices/invoice-form';
-// TODO: Import ActionButtons and configure for Invoice Edit context
+import { getServerSupabaseClient } from '@/lib/supabase/server-client';
+import { getAppSettings, getIssuingEntities, getPaymentSources } from '@/app/settings/actions';
+import { Button } from '@/components/ui/button';
+import Link from 'next/link';
+import { Currency } from '@/lib/constants';
 
 export default async function InvoiceEditPage({ params }: { params: { id: string } }) {
   const { id } = params;
-  const { invoice, error } = await getInvoiceById(id);
+  const invoice = await getInvoiceById(id);
+  
+  // Fetch required data for the form
+  const supabase = await getServerSupabaseClient();
+  const settings = await getAppSettings();
+  const issuingEntities = await getIssuingEntities();
+  const paymentSources = await getPaymentSources();
 
-  if (error || !invoice) {
-    console.error("Error fetching invoice for edit:", error);
+  if (!invoice) {
+    console.error("Error fetching invoice for edit:", id);
     notFound(); // Triggers 404 page
   }
 
-  // Bind the invoice ID to the update action
-  const updateInvoiceWithId = updateInvoice.bind(null, id);
+  // Fetch customers
+  const { data: customers } = await supabase
+    .from('customers')
+    .select('id, public_customer_id, company_contact_name, preferred_currency')
+    .is('deleted_at', null)
+    .order('company_contact_name', { ascending: true });
+
+  // Fetch products
+  const { data: products } = await supabase
+    .from('products')
+    .select(`
+      id, 
+      sku, 
+      name, 
+      description, 
+      base_price,
+      base_currency,
+      unit, 
+      status,
+      additional_prices:product_additional_prices(*)
+    `)
+    .is('deleted_at', null)
+    .order('name', { ascending: true });
 
   return (
     <div className="space-y-6">
@@ -22,14 +53,23 @@ export default async function InvoiceEditPage({ params }: { params: { id: string
         <h1 className="text-3xl font-bold tracking-tight">
           Edit Invoice {invoice.invoice_number || `#${id.substring(0, 6)}...`}
         </h1>
-        {/* TODO: Add ActionButtons component here, configured for Invoice Edit (e.g., Save, Cancel) */}
-        <div>Save/Cancel Buttons Placeholder</div>
+        <div>
+          <Button asChild variant="outline">
+            <Link href={`/invoices/${id}`}>Cancel</Link>
+          </Button>
+        </div>
       </div>
 
-      {/* Render the form with initial data and the update action */}
+      {/* Render the form with all required props */}
       <InvoiceForm
-        initialData={invoice}
-        onSubmitAction={updateInvoiceWithId}
+        invoice={invoice}
+        customers={customers || []}
+        issuingEntities={issuingEntities}
+        paymentSources={paymentSources}
+        products={products || []}
+        defaultCurrency={settings?.base_currency as Currency || 'USD'}
+        defaultTaxPercentage={settings?.default_tax_percentage || 0}
+        defaultDueDate={invoice.due_date}
       />
     </div>
   );

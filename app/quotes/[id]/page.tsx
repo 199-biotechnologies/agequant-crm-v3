@@ -4,35 +4,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { format } from 'date-fns';
+import Link from 'next/link';
+import { DocumentStatusUpdater } from '@/components/shared/document-status-updater';
 
-// TODO: Import ActionButtons and configure for Quote View context
+// Item type is inferred from the data structure
 
-// Define a type for individual line items
-interface QuoteLineItem {
-  id: string;
-  product_id: string;
-  product?: { name?: string };
-  description: string;
-  quantity: number;
-  unit_price: number;
-}
-
-// Define a type for the main quote object
-interface QuoteData {
-  id: string;
-  quote_number?: string | null;
-  issue_date: string;
-  expiry_date: string;
-  currency_code: string;
-  status?: string | null;
-  discount_percentage?: number | null;
-  tax_percentage?: number | null;
-  notes?: string | null;
-  customer?: { company_contact_name?: string | null; email?: string | null; phone?: string | null; } | null;
-  issuing_entity?: { entity_name?: string | null; } | null;
-  line_items?: QuoteLineItem[] | null;
-}
+// Define the quote type based on actual data structure from getQuoteById
 
 // Helper to format currency - reuse or import
 function formatCurrency(amount: number, currencyCode: string = 'USD'): string {
@@ -45,11 +24,10 @@ function formatCurrency(amount: number, currencyCode: string = 'USD'): string {
 
 export default async function QuoteViewPage({ params }: { params: { id: string } }) {
   const { id } = params;
-  const result = await getQuoteById(id) as { quote: QuoteData | null; error: string | null };
-  const { quote, error } = result;
+  const quote = await getQuoteById(id);
 
-  if (error || !quote) {
-    console.error("Error fetching quote for view:", error);
+  if (!quote) {
+    console.error("Error fetching quote for view:", id);
     notFound();
   }
 
@@ -65,11 +43,21 @@ export default async function QuoteViewPage({ params }: { params: { id: string }
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">
-          Quote {quote.quote_number || `#${id.substring(0, 6)}...`} {/* Display quote number if available */}
+          Quote {quote.quote_number || `#${id.substring(0, 6)}...`}
         </h1>
-        {/* TODO: Add ActionButtons component here, configured for Quote View */}
-        {/* <ActionButtons context="quoteView" quoteId={id} status={quote.status} /> */}
-        <div>Edit/Convert Buttons Placeholder</div>
+        <div className="flex gap-2">
+          {/* Edit button */}
+          <Button asChild variant="outline">
+            <Link href={`/quotes/${id}/edit`}>Edit</Link>
+          </Button>
+          
+          {/* Status management and conversion */}
+          <DocumentStatusUpdater 
+            id={id} 
+            currentStatus={quote.status || 'Draft'} 
+            type="quote" 
+          />
+        </div>
       </div>
 
       {/* Quote Details Card */}
@@ -84,8 +72,6 @@ export default async function QuoteViewPage({ params }: { params: { id: string }
           <div>
             <p className="text-sm font-medium text-muted-foreground">Customer</p>
             <p>{quote.customer?.company_contact_name || 'N/A'}</p>
-            <p className="text-sm text-muted-foreground">{quote.customer?.email}</p>
-            <p className="text-sm text-muted-foreground">{quote.customer?.phone}</p>
           </div>
           <div>
             <p className="text-sm font-medium text-muted-foreground">Issuing Entity</p>
@@ -105,7 +91,9 @@ export default async function QuoteViewPage({ params }: { params: { id: string }
           </div>
           <div>
             <p className="text-sm font-medium text-muted-foreground">Status</p>
-            <Badge variant={quote.status === 'Accepted' ? 'default' : quote.status === 'Rejected' ? 'destructive' : 'secondary'}>
+            <Badge variant={quote.status === 'Accepted' ? 'default' : 
+                           quote.status === 'Rejected' ? 'destructive' : 
+                           quote.status === 'Expired' ? 'outline' : 'secondary'}>
               {quote.status || 'Draft'}
             </Badge>
           </div>
@@ -132,7 +120,7 @@ export default async function QuoteViewPage({ params }: { params: { id: string }
               {quote.line_items && quote.line_items.length > 0 ? (
                 quote.line_items.map((item, index) => (
                   <TableRow key={item.id || index}>
-                    <TableCell>{item.product?.name || 'N/A'}</TableCell>
+                    <TableCell>{item.product?.name || item.product_id || 'N/A'}</TableCell>
                     <TableCell>{item.description}</TableCell>
                     <TableCell className="text-right">{item.quantity}</TableCell>
                     <TableCell className="text-right">{formatCurrency(item.unit_price, quote.currency_code)}</TableCell>
@@ -188,7 +176,6 @@ export default async function QuoteViewPage({ params }: { params: { id: string }
           </CardContent>
         </Card>
       </div>
-
     </div>
   );
 }

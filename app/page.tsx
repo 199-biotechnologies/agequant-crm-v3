@@ -2,7 +2,6 @@ import { ArrowUp, Clock, Package, Send, RefreshCw } from "lucide-react"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DashboardKPI } from "@/components/dashboard/dashboard-kpi"
 import { DashboardTable } from "@/components/dashboard/dashboard-table"
 import { RevenueChart } from "@/components/dashboard/revenue-chart"
@@ -59,14 +58,13 @@ export default function Dashboard() {
       <div className="grid gap-6 md:grid-cols-2">
         {/* Left Column */}
         <div className="space-y-6">
-          <Tabs defaultValue="overdue">
-            <div className="flex items-center justify-between">
-              <TabsList>
-                <TabsTrigger value="overdue">Overdue Invoices</TabsTrigger>
-                <TabsTrigger value="expiring">Expiring Quotes</TabsTrigger>
-              </TabsList>
-            </div>
-            <TabsContent value="overdue" className="space-y-4">
+          {/* Overdue Invoices */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle>Overdue Invoices</CardTitle>
+              <CardDescription>Invoices past their due date</CardDescription>
+            </CardHeader>
+            <CardContent>
               <DashboardTable
                 type="invoice"
                 data={[
@@ -96,8 +94,16 @@ export default function Dashboard() {
                   },
                 ]}
               />
-            </TabsContent>
-            <TabsContent value="expiring" className="space-y-4">
+            </CardContent>
+          </Card>
+          
+          {/* Expiring Quotes */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle>Expiring Quotes</CardTitle>
+              <CardDescription>Quotes expiring in the next 7 days</CardDescription>
+            </CardHeader>
+            <CardContent>
               <DashboardTable
                 type="quote"
                 data={[
@@ -127,8 +133,8 @@ export default function Dashboard() {
                   },
                 ]}
               />
-            </TabsContent>
-          </Tabs>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Right Column */}
