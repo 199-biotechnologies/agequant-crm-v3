@@ -87,7 +87,7 @@ export function InvoiceForm({
   const form = useForm<InvoiceFormValues>({
     resolver: zodResolver(invoiceFormSchema),
     defaultValues: {
-      entityId: invoice?.entity_id || '',
+      issuingEntityId: invoice?.entity_id || '',
       customerId: invoice?.customer_id || '',
       issueDate: invoice?.issue_date 
         ? new Date(invoice.issue_date).toISOString().split('T')[0]
@@ -149,7 +149,7 @@ export function InvoiceForm({
       const formData = new FormData()
       
       // Add basic fields
-      formData.append('entityId', data.entityId)
+      formData.append('issuingEntityId', data.issuingEntityId)
       formData.append('customerId', data.customerId)
       formData.append('issueDate', data.issueDate)
       formData.append('dueDate', data.dueDate)
@@ -211,13 +211,13 @@ export function InvoiceForm({
               <div className="space-y-2">
                 <Label htmlFor="entity-selector">Issuing Entity</Label>
                 <IssuingEntitySelector
-                  value={form.getValues('entityId')}
-                  onValueChange={(value) => form.setValue('entityId', value)}
+                  value={form.getValues('issuingEntityId')}
+                  onValueChange={(value) => form.setValue('issuingEntityId', value)}
                   items={issuingEntities}
                   disabled={submitting}
                 />
-                {form.formState.errors.entityId && (
-                  <p className="text-sm text-red-500">{form.formState.errors.entityId.message}</p>
+                {form.formState.errors.issuingEntityId && (
+                  <p className="text-sm text-red-500">{form.formState.errors.issuingEntityId.message}</p>
                 )}
               </div>
               

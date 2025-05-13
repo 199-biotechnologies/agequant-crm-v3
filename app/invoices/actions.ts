@@ -5,7 +5,6 @@ import { redirect } from 'next/navigation';
 import { getServerSupabaseClient } from '@/lib/supabase/server-client';
 import {
   invoiceFormSchema,
-  // InvoiceFormValues - unused
   DbInvoice,
   DbLineItem
 } from '@/lib/schemas/financial-documents';
@@ -14,6 +13,11 @@ import {
   handleDatabaseError, 
   ErrorResponse 
 } from '@/lib/utils/error-handler';
+import {
+  extractLineItemsFromFormData,
+  calculateInvoiceTotals,
+  toISODate
+} from '@/lib/utils/financial-document-utils';
 
 // --- Shared Types for Invoice Data Structure ---
 export interface DbInvoiceWithItems extends DbInvoice {
@@ -70,7 +74,7 @@ export async function getInvoiceById(id: string): Promise<InvoiceWithRelations |
 }
 
 /**
- * Creates a new invoice
+ * Creates a new invoice using the atomic transaction RPC function
  * 
  * @param formData - Form data containing invoice details
  * @returns Success or error response
@@ -80,26 +84,9 @@ export async function createInvoice(formData: FormData) {
 
   // Parse and validate form data
   try {
-    // Extract line items from the form data
+    // Extract and transform form data
     const rawFormData = Object.fromEntries(formData.entries());
-    let lineItemsForValidation: any[] = [];
-    
-    if (typeof rawFormData.lineItems === 'string') {
-      try {
-        const parsed = JSON.parse(rawFormData.lineItems);
-        if (Array.isArray(parsed)) {
-          lineItemsForValidation = parsed;
-        } else {
-          throw new Error("Parsed lineItems is not an array.");
-        }
-      } catch (e) {
-        const err = e instanceof Error ? e : new Error(String(e));
-        console.error("Failed to parse lineItems JSON:", err.message);
-        return { error: "Invalid line item data format." };
-      }
-    } else if (Array.isArray(rawFormData.lineItems)) {
-      lineItemsForValidation = rawFormData.lineItems;
-    }
+    const lineItemsForValidation = extractLineItemsFromFormData(rawFormData);
     
     // Create a complete form data object with parsed line items
     const dataForValidation = {
@@ -113,65 +100,46 @@ export async function createInvoice(formData: FormData) {
       return handleValidationError(validatedFields.error, 'invoice');
     }
 
-    // --- Prepare for database insertion ---
+    // Calculate totals
+    const { subtotalAmount, taxAmount, totalAmount } = calculateInvoiceTotals(validatedFields.data);
 
-    // 1. Calculate totals
-    const lineItems = validatedFields.data.lineItems;
-    const subtotal = lineItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
-    const taxAmount = subtotal * (validatedFields.data.taxPercent / 100);
-    const totalAmount = subtotal + taxAmount;
-
-    // 2. Prepare invoice data
-    const invoiceData = {
-      entity_id: validatedFields.data.entityId,
-      customer_id: validatedFields.data.customerId,
-      issue_date: new Date(validatedFields.data.issueDate).toISOString(),
-      due_date: new Date(validatedFields.data.dueDate).toISOString(),
-      currency_code: validatedFields.data.currency,
-      payment_source_id: validatedFields.data.paymentSourceId,
-      tax_percentage: validatedFields.data.taxPercent,
-      notes: validatedFields.data.notes,
-      status: 'Draft', // Default status for new invoices
-      subtotal_amount: subtotal,
-      tax_amount: taxAmount,
-      total_amount: totalAmount,
-    };
-
-    // 3. Start a transaction
-    // TODO: Refactor to use an RPC function for atomicity (see comprehensive-implementation-plan.md)
-    const { data: invoice, error: invoiceError } = await supabase
-      .from('invoices')
-      .insert([invoiceData])
-      .select('id, invoice_number')
-      .single();
-
-    if (invoiceError) {
-      return handleDatabaseError(invoiceError, 'create', 'invoice');
-    }
-
-    // 4. Insert line items
-    const lineItemsData = lineItems.map(item => ({
-      invoice_id: invoice.id,
+    // Prepare line items in the format expected by our RPC function
+    const lineItemsForDb = validatedFields.data.lineItems.map(item => ({
       product_id: item.productId,
       description: item.description,
       quantity: item.quantity,
       unit_price: item.unitPrice,
-      fx_rate: item.fxRate, // Add FX rate if provided
-      total_amount: item.quantity * item.unitPrice,
+      fx_rate: item.fxRate,
+      total_amount: item.quantity * item.unitPrice
     }));
 
-    const { error: lineItemsError } = await supabase
-      .from('invoice_items')
-      .insert(lineItemsData);
+    // Call the RPC function to create the invoice with line items atomically
+    const { data, error } = await supabase.rpc('create_invoice_with_items', {
+      p_entity_id: validatedFields.data.issuingEntityId,
+      p_customer_id: validatedFields.data.customerId,
+      p_issue_date: toISODate(validatedFields.data.issueDate),
+      p_due_date: toISODate(validatedFields.data.dueDate),
+      p_currency_code: validatedFields.data.currency,
+      p_payment_source_id: validatedFields.data.paymentSourceId,
+      p_tax_percentage: validatedFields.data.taxPercent,
+      p_notes: validatedFields.data.notes || null,
+      p_status: 'Draft', // Default status for new invoices
+      p_source_quote_id: null, // No source quote for manually created invoices
+      p_subtotal_amount: subtotalAmount,
+      p_tax_amount: taxAmount,
+      p_total_amount: totalAmount,
+      p_line_items: JSON.stringify(lineItemsForDb)
+    });
 
-    if (lineItemsError) {
-      // This could leave an invoice without items if there's an error - should use a true transaction
-      return handleDatabaseError(lineItemsError, 'create', 'invoice items');
+    if (error || (data && !data.success)) {
+      const errMessage = data?.error || error?.message || 'Failed to create invoice';
+      console.error('Error creating invoice:', errMessage);
+      return { error: errMessage };
     }
 
     // Revalidate cache and redirect
     revalidatePath('/invoices');
-    redirect(`/invoices/${invoice.id}`);
+    redirect(`/invoices/${data.id}`);
 
   } catch (error) {
     console.error('Unexpected error creating invoice:', error);
@@ -182,7 +150,7 @@ export async function createInvoice(formData: FormData) {
 }
 
 /**
- * Updates an existing invoice
+ * Updates an existing invoice using the atomic transaction RPC function
  * 
  * @param id - Invoice ID to update
  * @param formData - Form data containing updated invoice details
@@ -197,26 +165,9 @@ export async function updateInvoice(id: string, formData: FormData): Promise<Err
 
   // Parse and validate form data (similar to createInvoice)
   try {
-    // Extract line items from the form data
+    // Extract and transform form data
     const rawFormData = Object.fromEntries(formData.entries());
-    let lineItemsForValidation: any[] = [];
-    
-    if (typeof rawFormData.lineItems === 'string') {
-      try {
-        const parsed = JSON.parse(rawFormData.lineItems);
-        if (Array.isArray(parsed)) {
-          lineItemsForValidation = parsed;
-        } else {
-          throw new Error("Parsed lineItems is not an array.");
-        }
-      } catch (e) {
-        const err = e instanceof Error ? e : new Error(String(e));
-        console.error("Failed to parse lineItems JSON:", err.message);
-        return { error: "Invalid line item data format." };
-      }
-    } else if (Array.isArray(rawFormData.lineItems)) {
-      lineItemsForValidation = rawFormData.lineItems;
-    }
+    const lineItemsForValidation = extractLineItemsFromFormData(rawFormData);
     
     // Create a complete form data object with parsed line items
     const dataForValidation = {
@@ -230,100 +181,41 @@ export async function updateInvoice(id: string, formData: FormData): Promise<Err
       return handleValidationError(validatedFields.error, 'invoice');
     }
 
-    // --- Prepare for database update ---
+    // Calculate totals
+    const { subtotalAmount, taxAmount, totalAmount } = calculateInvoiceTotals(validatedFields.data);
 
-    // 1. Calculate totals
-    const lineItems = validatedFields.data.lineItems;
-    const subtotal = lineItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
-    const taxAmount = subtotal * (validatedFields.data.taxPercent / 100);
-    const totalAmount = subtotal + taxAmount;
+    // Prepare line items in the format expected by our RPC function
+    const lineItemsForDb = validatedFields.data.lineItems.map(item => ({
+      product_id: item.productId,
+      description: item.description,
+      quantity: item.quantity,
+      unit_price: item.unitPrice,
+      fx_rate: item.fxRate,
+      total_amount: item.quantity * item.unitPrice
+    }));
 
-    // 2. Prepare invoice data update
-    const invoiceData = {
-      entity_id: validatedFields.data.entityId,
-      customer_id: validatedFields.data.customerId,
-      issue_date: new Date(validatedFields.data.issueDate).toISOString(),
-      due_date: new Date(validatedFields.data.dueDate).toISOString(),
-      currency_code: validatedFields.data.currency,
-      payment_source_id: validatedFields.data.paymentSourceId,
-      tax_percentage: validatedFields.data.taxPercent,
-      notes: validatedFields.data.notes,
-      subtotal_amount: subtotal,
-      tax_amount: taxAmount,
-      total_amount: totalAmount,
-      // Don't update status here unless explicitly included in the form
-      status: validatedFields.data.status || undefined,
-    };
+    // Call the RPC function to update the invoice with line items atomically
+    const { data, error } = await supabase.rpc('update_invoice_with_items', {
+      p_invoice_id: id,
+      p_entity_id: validatedFields.data.issuingEntityId,
+      p_customer_id: validatedFields.data.customerId,
+      p_issue_date: toISODate(validatedFields.data.issueDate),
+      p_due_date: toISODate(validatedFields.data.dueDate),
+      p_currency_code: validatedFields.data.currency,
+      p_payment_source_id: validatedFields.data.paymentSourceId,
+      p_tax_percentage: validatedFields.data.taxPercent,
+      p_notes: validatedFields.data.notes || null,
+      p_status: validatedFields.data.status || null, // Don't update status if not provided
+      p_subtotal_amount: subtotalAmount,
+      p_tax_amount: taxAmount,
+      p_total_amount: totalAmount,
+      p_line_items: JSON.stringify(lineItemsForDb)
+    });
 
-    // 3. Update the invoice
-    const { error: invoiceError } = await supabase
-      .from('invoices')
-      .update(invoiceData)
-      .eq('id', id);
-
-    if (invoiceError) {
-      return handleDatabaseError(invoiceError, 'update', 'invoice');
-    }
-
-    // 4. Handle line items
-    // First, get existing line items to determine what to update/delete/insert
-    const { data: existingItems } = await supabase
-      .from('invoice_items')
-      .select('id')
-      .eq('invoice_id', id);
-
-    const existingItemIds = existingItems?.map(item => item.id) || [];
-    const formItemIds = lineItems
-      .filter(item => item.id) // Only consider items with IDs (existing ones)
-      .map(item => item.id);
-
-    // Items to delete = existingItemIds - formItemIds
-    const itemsToDeleteIds = existingItemIds.filter(id => !formItemIds.includes(id));
-
-    if (itemsToDeleteIds.length > 0) {
-      // Delete removed items
-      const { error: deleteError } = await supabase
-        .from('invoice_items')
-        .delete()
-        .in('id', itemsToDeleteIds);
-
-      if (deleteError) {
-        return handleDatabaseError(deleteError, 'delete', 'invoice items');
-      }
-    }
-
-    // Process each line item (update existing, insert new)
-    for (const item of lineItems) {
-      const itemData = {
-        invoice_id: id,
-        product_id: item.productId,
-        description: item.description,
-        quantity: item.quantity,
-        unit_price: item.unitPrice,
-        fx_rate: item.fxRate,
-        total_amount: item.quantity * item.unitPrice,
-      };
-
-      if (item.id) {
-        // Update existing item
-        const { error: updateError } = await supabase
-          .from('invoice_items')
-          .update(itemData)
-          .eq('id', item.id);
-
-        if (updateError) {
-          return handleDatabaseError(updateError, 'update', 'invoice item');
-        }
-      } else {
-        // Insert new item
-        const { error: insertError } = await supabase
-          .from('invoice_items')
-          .insert([itemData]);
-
-        if (insertError) {
-          return handleDatabaseError(insertError, 'create', 'invoice item');
-        }
-      }
+    if (error || (data && !data.success)) {
+      const errMessage = data?.error || error?.message || 'Failed to update invoice';
+      console.error('Error updating invoice:', errMessage);
+      return { error: errMessage };
     }
 
     // Revalidate cache and redirect

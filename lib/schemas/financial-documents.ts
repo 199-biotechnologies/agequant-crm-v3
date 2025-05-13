@@ -39,7 +39,8 @@ export type LineItemFormValues = z.infer<typeof lineItemSchema>;
  * Base schema for shared fields between invoice and quote forms
  */
 const baseDocumentSchema = z.object({
-  entityId: z.string().uuid("Invalid entity ID format").min(1, "Issuing Entity is required"),
+  // Using issuingEntityId to match database column name pattern (issuing_entity_id)
+  issuingEntityId: z.string().uuid("Invalid entity ID format").min(1, "Issuing Entity is required"),
   customerId: z.string().uuid("Invalid customer ID format").min(1, "Customer is required"),
   issueDate: z.string().min(1, "Issue date is required").refine(val => !isNaN(Date.parse(val)), { 
     message: "Invalid issue date" 

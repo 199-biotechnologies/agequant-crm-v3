@@ -5,7 +5,6 @@ import { redirect } from 'next/navigation';
 import { getServerSupabaseClient } from '@/lib/supabase/server-client';
 import {
   quoteFormSchema,
-  // QuoteFormValues - unused
   DbQuote,
   DbLineItem
 } from '@/lib/schemas/financial-documents';
@@ -14,6 +13,11 @@ import {
   handleDatabaseError, 
   ErrorResponse 
 } from '@/lib/utils/error-handler';
+import {
+  extractLineItemsFromFormData,
+  calculateQuoteTotals,
+  toISODate
+} from '@/lib/utils/financial-document-utils';
 
 // --- Shared Types for Quote Data Structure ---
 export interface DbQuoteWithItems extends DbQuote {
@@ -70,7 +74,7 @@ export async function getQuoteById(id: string): Promise<QuoteWithRelations | nul
 }
 
 /**
- * Creates a new quote
+ * Creates a new quote using the atomic transaction RPC function
  * 
  * @param formData - Form data containing quote details
  * @returns Success or error response
@@ -80,26 +84,9 @@ export async function createQuote(formData: FormData) {
 
   // Parse and validate form data
   try {
-    // Extract line items from the form data
+    // Extract and transform form data
     const rawFormData = Object.fromEntries(formData.entries());
-    let lineItemsForValidation: any[] = [];
-    
-    if (typeof rawFormData.lineItems === 'string') {
-      try {
-        const parsed = JSON.parse(rawFormData.lineItems);
-        if (Array.isArray(parsed)) {
-          lineItemsForValidation = parsed;
-        } else {
-          throw new Error("Parsed lineItems is not an array.");
-        }
-      } catch (e) {
-        const err = e instanceof Error ? e : new Error(String(e));
-        console.error("Failed to parse lineItems JSON:", err.message);
-        return { error: "Invalid line item data format." };
-      }
-    } else if (Array.isArray(rawFormData.lineItems)) {
-      lineItemsForValidation = rawFormData.lineItems;
-    }
+    const lineItemsForValidation = extractLineItemsFromFormData(rawFormData);
     
     // Create a complete form data object with parsed line items
     const dataForValidation = {
@@ -113,69 +100,47 @@ export async function createQuote(formData: FormData) {
       return handleValidationError(validatedFields.error, 'quote');
     }
 
-    // --- Prepare for database insertion ---
+    // Calculate totals
+    const { subtotalAmount, discountAmount, taxAmount, totalAmount } = calculateQuoteTotals(validatedFields.data);
 
-    // 1. Calculate totals
-    const lineItems = validatedFields.data.lineItems;
-    const subtotal = lineItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
-    const discountAmount = subtotal * (validatedFields.data.discountPercent || 0) / 100;
-    const taxableAmount = subtotal - discountAmount;
-    const taxAmount = taxableAmount * (validatedFields.data.taxPercent / 100);
-    const totalAmount = taxableAmount + taxAmount;
-
-    // 2. Prepare quote data
-    const quoteData = {
-      entity_id: validatedFields.data.entityId,
-      customer_id: validatedFields.data.customerId,
-      issue_date: new Date(validatedFields.data.issueDate).toISOString(),
-      expiry_date: new Date(validatedFields.data.expiryDate).toISOString(),
-      currency_code: validatedFields.data.currency,
-      payment_source_id: validatedFields.data.paymentSourceId,
-      discount_percentage: validatedFields.data.discountPercent || 0,
-      tax_percentage: validatedFields.data.taxPercent,
-      notes: validatedFields.data.notes,
-      status: 'Draft', // Default status for new quotes
-      subtotal_amount: subtotal,
-      discount_amount: discountAmount,
-      tax_amount: taxAmount,
-      total_amount: totalAmount,
-    };
-
-    // 3. Start a transaction
-    // TODO: Refactor to use an RPC function for atomicity (see comprehensive-implementation-plan.md)
-    const { data: quote, error: quoteError } = await supabase
-      .from('quotes')
-      .insert([quoteData])
-      .select('id, quote_number')
-      .single();
-
-    if (quoteError) {
-      return handleDatabaseError(quoteError, 'create', 'quote');
-    }
-
-    // 4. Insert line items
-    const lineItemsData = lineItems.map(item => ({
-      quote_id: quote.id,
+    // Prepare line items in the format expected by our RPC function
+    const lineItemsForDb = validatedFields.data.lineItems.map(item => ({
       product_id: item.productId,
       description: item.description,
       quantity: item.quantity,
       unit_price: item.unitPrice,
-      fx_rate: item.fxRate, // Add FX rate if provided
-      total_amount: item.quantity * item.unitPrice,
+      fx_rate: item.fxRate,
+      total_amount: item.quantity * item.unitPrice
     }));
 
-    const { error: lineItemsError } = await supabase
-      .from('quote_items')
-      .insert(lineItemsData);
+    // Call the RPC function to create the quote with line items atomically
+    const { data, error } = await supabase.rpc('create_quote_with_items', {
+      p_entity_id: validatedFields.data.issuingEntityId,
+      p_customer_id: validatedFields.data.customerId,
+      p_issue_date: toISODate(validatedFields.data.issueDate),
+      p_expiry_date: toISODate(validatedFields.data.expiryDate),
+      p_currency_code: validatedFields.data.currency,
+      p_payment_source_id: validatedFields.data.paymentSourceId,
+      p_discount_percentage: validatedFields.data.discountPercent || 0,
+      p_tax_percentage: validatedFields.data.taxPercent,
+      p_notes: validatedFields.data.notes || null,
+      p_status: 'Draft', // Default status for new quotes
+      p_subtotal_amount: subtotalAmount,
+      p_discount_amount: discountAmount,
+      p_tax_amount: taxAmount,
+      p_total_amount: totalAmount,
+      p_line_items: JSON.stringify(lineItemsForDb)
+    });
 
-    if (lineItemsError) {
-      // This could leave a quote without items if there's an error - should use a true transaction
-      return handleDatabaseError(lineItemsError, 'create', 'quote items');
+    if (error || (data && !data.success)) {
+      const errMessage = data?.error || error?.message || 'Failed to create quote';
+      console.error('Error creating quote:', errMessage);
+      return { error: errMessage };
     }
 
     // Revalidate cache and redirect
     revalidatePath('/quotes');
-    redirect(`/quotes/${quote.id}`);
+    redirect(`/quotes/${data.id}`);
 
   } catch (error) {
     console.error('Unexpected error creating quote:', error);
@@ -186,7 +151,7 @@ export async function createQuote(formData: FormData) {
 }
 
 /**
- * Updates an existing quote
+ * Updates an existing quote using the atomic transaction RPC function
  * 
  * @param id - Quote ID to update
  * @param formData - Form data containing updated quote details
@@ -201,26 +166,9 @@ export async function updateQuote(id: string, formData: FormData): Promise<Error
 
   // Parse and validate form data (similar to createQuote)
   try {
-    // Extract line items from the form data
+    // Extract and transform form data
     const rawFormData = Object.fromEntries(formData.entries());
-    let lineItemsForValidation: any[] = [];
-    
-    if (typeof rawFormData.lineItems === 'string') {
-      try {
-        const parsed = JSON.parse(rawFormData.lineItems);
-        if (Array.isArray(parsed)) {
-          lineItemsForValidation = parsed;
-        } else {
-          throw new Error("Parsed lineItems is not an array.");
-        }
-      } catch (e) {
-        const err = e instanceof Error ? e : new Error(String(e));
-        console.error("Failed to parse lineItems JSON:", err.message);
-        return { error: "Invalid line item data format." };
-      }
-    } else if (Array.isArray(rawFormData.lineItems)) {
-      lineItemsForValidation = rawFormData.lineItems;
-    }
+    const lineItemsForValidation = extractLineItemsFromFormData(rawFormData);
     
     // Create a complete form data object with parsed line items
     const dataForValidation = {
@@ -234,104 +182,43 @@ export async function updateQuote(id: string, formData: FormData): Promise<Error
       return handleValidationError(validatedFields.error, 'quote');
     }
 
-    // --- Prepare for database update ---
+    // Calculate totals
+    const { subtotalAmount, discountAmount, taxAmount, totalAmount } = calculateQuoteTotals(validatedFields.data);
 
-    // 1. Calculate totals
-    const lineItems = validatedFields.data.lineItems;
-    const subtotal = lineItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
-    const discountAmount = subtotal * (validatedFields.data.discountPercent || 0) / 100;
-    const taxableAmount = subtotal - discountAmount;
-    const taxAmount = taxableAmount * (validatedFields.data.taxPercent / 100);
-    const totalAmount = taxableAmount + taxAmount;
+    // Prepare line items in the format expected by our RPC function
+    const lineItemsForDb = validatedFields.data.lineItems.map(item => ({
+      product_id: item.productId,
+      description: item.description,
+      quantity: item.quantity,
+      unit_price: item.unitPrice,
+      fx_rate: item.fxRate,
+      total_amount: item.quantity * item.unitPrice
+    }));
 
-    // 2. Prepare quote data update
-    const quoteData = {
-      entity_id: validatedFields.data.entityId,
-      customer_id: validatedFields.data.customerId,
-      issue_date: new Date(validatedFields.data.issueDate).toISOString(),
-      expiry_date: new Date(validatedFields.data.expiryDate).toISOString(),
-      currency_code: validatedFields.data.currency,
-      payment_source_id: validatedFields.data.paymentSourceId,
-      discount_percentage: validatedFields.data.discountPercent || 0,
-      tax_percentage: validatedFields.data.taxPercent,
-      notes: validatedFields.data.notes,
-      subtotal_amount: subtotal,
-      discount_amount: discountAmount,
-      tax_amount: taxAmount,
-      total_amount: totalAmount,
-      // Don't update status here unless explicitly included in the form
-      status: validatedFields.data.status || undefined,
-    };
+    // Call the RPC function to update the quote with line items atomically
+    const { data, error } = await supabase.rpc('update_quote_with_items', {
+      p_quote_id: id,
+      p_entity_id: validatedFields.data.issuingEntityId,
+      p_customer_id: validatedFields.data.customerId,
+      p_issue_date: toISODate(validatedFields.data.issueDate),
+      p_expiry_date: toISODate(validatedFields.data.expiryDate),
+      p_currency_code: validatedFields.data.currency,
+      p_payment_source_id: validatedFields.data.paymentSourceId,
+      p_discount_percentage: validatedFields.data.discountPercent || 0,
+      p_tax_percentage: validatedFields.data.taxPercent,
+      p_notes: validatedFields.data.notes || null,
+      p_status: validatedFields.data.status || null, // Don't update status if not provided
+      p_subtotal_amount: subtotalAmount,
+      p_discount_amount: discountAmount,
+      p_tax_amount: taxAmount,
+      p_total_amount: totalAmount,
+      p_line_items: JSON.stringify(lineItemsForDb)
+    });
 
-    // 3. Update the quote
-    const { error: quoteError } = await supabase
-      .from('quotes')
-      .update(quoteData)
-      .eq('id', id);
-
-    if (quoteError) {
-      return handleDatabaseError(quoteError, 'update', 'quote');
-    }
-
-    // 4. Handle line items
-    // First, get existing line items to determine what to update/delete/insert
-    const { data: existingItems } = await supabase
-      .from('quote_items')
-      .select('id')
-      .eq('quote_id', id);
-
-    const existingItemIds = existingItems?.map(item => item.id) || [];
-    const formItemIds = lineItems
-      .filter(item => item.id) // Only consider items with IDs (existing ones)
-      .map(item => item.id);
-
-    // Items to delete = existingItemIds - formItemIds
-    const itemsToDeleteIds = existingItemIds.filter(id => !formItemIds.includes(id));
-
-    if (itemsToDeleteIds.length > 0) {
-      // Delete removed items
-      const { error: deleteError } = await supabase
-        .from('quote_items')
-        .delete()
-        .in('id', itemsToDeleteIds);
-
-      if (deleteError) {
-        return handleDatabaseError(deleteError, 'delete', 'quote items');
-      }
-    }
-
-    // Process each line item (update existing, insert new)
-    for (const item of lineItems) {
-      const itemData = {
-        quote_id: id,
-        product_id: item.productId,
-        description: item.description,
-        quantity: item.quantity,
-        unit_price: item.unitPrice,
-        fx_rate: item.fxRate,
-        total_amount: item.quantity * item.unitPrice,
-      };
-
-      if (item.id) {
-        // Update existing item
-        const { error: updateError } = await supabase
-          .from('quote_items')
-          .update(itemData)
-          .eq('id', item.id);
-
-        if (updateError) {
-          return handleDatabaseError(updateError, 'update', 'quote item');
-        }
-      } else {
-        // Insert new item
-        const { error: insertError } = await supabase
-          .from('quote_items')
-          .insert([itemData]);
-
-        if (insertError) {
-          return handleDatabaseError(insertError, 'create', 'quote item');
-        }
-      }
+    if (error || (data && !data.success)) {
+      const errMessage = data?.error || error?.message || 'Failed to update quote';
+      console.error('Error updating quote:', errMessage);
+      return { error: errMessage };
     }
 
     // Revalidate cache and redirect
@@ -408,7 +295,7 @@ export async function updateQuoteStatus(
 }
 
 /**
- * Converts a quote to an invoice
+ * Converts a quote to an invoice using the atomic RPC function
  * 
  * @param quoteId - ID of the quote to convert
  * @param dueDate - Due date for the created invoice
@@ -425,72 +312,16 @@ export async function convertQuoteToInvoice(
   const supabase = await getServerSupabaseClient();
 
   try {
-    // 1. Get the quote with all its details
-    const quote = await getQuoteById(quoteId);
-    if (!quote) {
-      return { error: "Quote not found." };
-    }
+    // Use the RPC function for atomic conversion
+    const { data, error } = await supabase.rpc('convert_quote_to_invoice', {
+      p_quote_id: quoteId,
+      p_due_date: toISODate(dueDate)
+    });
 
-    // 2. Create invoice data based on quote
-    const invoiceData = {
-      entity_id: quote.entity_id,
-      customer_id: quote.customer_id,
-      issue_date: new Date().toISOString(),
-      due_date: new Date(dueDate).toISOString(),
-      currency_code: quote.currency_code,
-      payment_source_id: quote.payment_source_id,
-      tax_percentage: quote.tax_percentage,
-      notes: quote.notes,
-      status: 'Draft',
-      subtotal_amount: quote.subtotal_amount,
-      tax_amount: quote.tax_amount,
-      total_amount: quote.total_amount,
-      source_quote_id: quoteId,
-    };
-
-    // 3. Insert the invoice
-    const { data: invoice, error: invoiceError } = await supabase
-      .from('invoices')
-      .insert([invoiceData])
-      .select('id, invoice_number')
-      .single();
-
-    if (invoiceError) {
-      return handleDatabaseError(invoiceError, 'create', 'invoice from quote');
-    }
-
-    // 4. Copy line items from quote to invoice
-    if (quote.items && quote.items.length > 0) {
-      const lineItemsData = quote.items.map((item: any) => ({
-        invoice_id: invoice.id,
-        product_id: item.product_id,
-        description: item.description,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        fx_rate: item.fx_rate,
-        total_amount: item.total_amount,
-      }));
-
-      const { error: lineItemsError } = await supabase
-        .from('invoice_items')
-        .insert(lineItemsData);
-
-      if (lineItemsError) {
-        return handleDatabaseError(lineItemsError, 'create', 'invoice items from quote');
-      }
-    }
-
-    // 5. Update quote status and link to invoice
-    const { error: updateError } = await supabase
-      .from('quotes')
-      .update({
-        status: 'Accepted',
-        converted_invoice_id: invoice.id
-      })
-      .eq('id', quoteId);
-
-    if (updateError) {
-      return handleDatabaseError(updateError, 'update', 'quote status after conversion');
+    if (error || (data && !data.success)) {
+      const errMessage = data?.error || error?.message || 'Failed to convert quote to invoice';
+      console.error('Error converting quote to invoice:', errMessage);
+      return { error: errMessage };
     }
 
     // Revalidate cache
@@ -500,7 +331,7 @@ export async function convertQuoteToInvoice(
 
     return { 
       success: true,
-      invoiceId: invoice.id
+      invoiceId: data.invoice_id
     };
   } catch (error) {
     console.error('Unexpected error converting quote to invoice:', error);

@@ -9,6 +9,8 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Configure to properly handle PDF generation API routes
+  serverExternalPackages: ['pdfmake'],
 }
 
 export default nextConfig
