@@ -113,7 +113,7 @@ export function LineItemEditor({
   }
 
   // Update a field in a line item
-  const updateLineItem = (index: number, field: string, value: any) => {
+  const updateLineItem = (index: number, field: string, value: number | string | undefined) => {
     const newItems = [...lineItems]
     newItems[index] = {
       ...newItems[index],

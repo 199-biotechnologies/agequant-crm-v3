@@ -1,771 +1,391 @@
-"use client"
+'use client'
 
-import type React from "react";
-import { useEffect, useState, useMemo } from "react";
-import { Trash2 } from "lucide-react";
-import { useForm, useFieldArray } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-import { format, parseISO } from 'date-fns'; // Added parseISO
+import { useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { useRouter } from 'next/navigation'
+import { 
+  InvoiceFormValues, 
+  invoiceFormSchema,
+  DbInvoice
+} from '@/lib/schemas/financial-documents'
+import { Form } from '@/components/ui/form'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { LineItemEditor } from '@/components/shared/line-item-editor'
+import { 
+  CustomerSelector, 
+  IssuingEntitySelector, 
+  PaymentSourceSelector,
+  Customer,
+  IssuingEntity,
+  PaymentSource
+} from '@/components/shared/entity-selectors'
+import { createInvoice, updateInvoice } from '@/app/invoices/actions'
+import { useToast } from '@/components/ui/use-toast'
+import { Currency, ALLOWED_CURRENCIES } from '@/lib/constants'
+import { Label } from '@/components/ui/label'
+import { 
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue 
+} from '@/components/ui/select'
+import { calculateInvoiceTotals, formatCurrency } from '@/lib/utils/financial-document-utils'
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Separator } from "@/components/ui/separator";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Skeleton } from "@/components/ui/skeleton";
-import { toast } from "@/components/ui/use-toast";
-
-// Import Server Actions and Types
-import {
-  getAppSettings,
-  getIssuingEntities,
-  getPaymentSources,
-} from "@/app/settings/actions";
-import {
-  type AppSettings,
-  type IssuingEntity,
-  type PaymentSource,
-  ALLOWED_CURRENCIES
-} from "@/app/settings/types";
-// Import the specific data types from actions.ts
-import { type DbInvoiceData, type DbInvoiceLineItem } from "@/app/invoices/actions";
-
-// TODO: Import actual customer/product fetching actions and types when available
-// For now, using placeholder types and functions
-type Customer = { id: string; name: string; preferred_currency?: string | null };
-type Product = { id: string; sku: string; name: string; description: string | null; base_price: number; unit: string; status: string };
-async function getCustomers(): Promise<Customer[]> { console.warn("getCustomers not implemented, returning mock data."); return [{ id: "cust_1", name: "Placeholder Customer 1" }, { id: "cust_2", name: "Placeholder Customer 2" }]; }
-async function getProducts(): Promise<Product[]> { console.warn("getProducts not implemented, returning mock data."); return [{ id: "prod_1", sku: "P-1", name: "Placeholder Product", description: "Desc", base_price: 100, unit: 'pc', status: 'Active' }]; }
-
-
-// --- Schema Definition (Matches schema in actions.ts) ---
-const lineItemSchema = z.object({
-  // id: z.string().optional(), // Keep internal ID for key, but maybe not needed for validation itself
-  productId: z.string().uuid("Invalid product ID format").min(1, "Product is required"),
-  description: z.string().min(1, "Description is required").max(1000, "Description too long"),
-  quantity: z.preprocess(
-    (val) => (typeof val === 'string' ? parseInt(val, 10) : val),
-    z.number().int().min(1, "Quantity must be at least 1")
-  ),
-  unitPrice: z.preprocess(
-    (val) => (typeof val === 'string' ? parseFloat(val) : val),
-    z.number().min(0, "Unit price cannot be negative")
-  ),
-  // total is calculated client-side for display, not part of the core form data schema for submission.
-  // Removing from schema to simplify FormLineItemFields type and match map output.
-  // total: z.number().optional(),
-});
-
-const invoiceFormSchema = z.object({
-  entityId: z.string().uuid("Invalid entity ID format").min(1, "Issuing Entity is required"),
-  customerId: z.string().uuid("Invalid customer ID format").min(1, "Customer is required"),
-  issueDate: z.string().min(1, "Issue date is required").refine(val => !isNaN(Date.parse(val)), { message: "Invalid issue date" }),
-  dueDate: z.string().min(1, "Due date is required").refine(val => !isNaN(Date.parse(val)), { message: "Invalid due date" }),
-  currency: z.string().length(3, "Currency code must be 3 letters").min(1, "Currency is required"),
-  paymentSourceId: z.string().uuid("Invalid payment source ID format").min(1, "Payment source is required"),
-  taxPercent: z.preprocess(
-    (val) => (typeof val === 'string' ? parseFloat(val) : val),
-    z.number().min(0, "Tax cannot be negative").max(100, "Tax cannot exceed 100%").default(0)
-  ),
-  notes: z.string().max(2000, "Notes too long").optional(),
-  lineItems: z.array(lineItemSchema).min(1, "At least one line item is required"),
-});
-
-type InvoiceFormValues = z.infer<typeof invoiceFormSchema>;
-
-// Type for line items as expected by the form's Zod schema (derived from local schema)
-type FormLineItemFields = z.infer<typeof lineItemSchema>;
-
-
-// Type for the initialData prop is now directly DbInvoiceData
-type InitialInvoiceData = DbInvoiceData;
-
-
-// --- Helper Functions ---
-// (Keep calculateDueDate and generatePaymentInstructions helpers as they are)
-function calculateDueDate(issueDateStr: string, paymentTermsDays: number | null | undefined): string {
-  try {
-    const issueDate = new Date(issueDateStr);
-    const days = paymentTermsDays ?? 30; // Default to 30 days if not set
-    issueDate.setDate(issueDate.getDate() + days);
-    return format(issueDate, 'yyyy-MM-dd');
-  } catch (e) {
-    console.error("Error calculating due date:", e);
-    const fallbackDate = new Date();
-    fallbackDate.setDate(fallbackDate.getDate() + 30);
-    return format(fallbackDate, 'yyyy-MM-dd');
-  }
-}
-
-function generatePaymentInstructions(source: PaymentSource | null | undefined): string {
-  if (!source) return "Payment details not available. Please select a valid payment source.";
-  let instructions = `Payment Method: ${source.name}\n`;
-  if (source.bank_name) instructions += `Bank: ${source.bank_name}\n`;
-  if (source.account_holder_name) instructions += `Account Name: ${source.account_holder_name}\n`;
-  if (source.account_number) instructions += `Account #: ${source.account_number}\n`;
-  if (source.iban) instructions += `IBAN: ${source.iban}\n`;
-  if (source.swift_bic) instructions += `SWIFT/BIC: ${source.swift_bic}\n`;
-  if (source.routing_number_us) instructions += `Routing (US): ${source.routing_number_us}\n`;
-  if (source.sort_code_uk) instructions += `Sort Code (UK): ${source.sort_code_uk}\n`;
-  if (source.additional_details) instructions += `\n${source.additional_details}\n`;
-  return instructions.trim();
-}
-
-
-// --- Component ---
 interface InvoiceFormProps {
-  initialData?: InitialInvoiceData | null;
-  onSubmitAction: (formData: FormData) => Promise<{ error?: string }>; // Server action for submission
+  invoice?: Partial<DbInvoice> & { items?: Record<string, unknown>[] }
+  customers: Customer[]
+  issuingEntities: IssuingEntity[]
+  paymentSources: PaymentSource[]
+  products: Product[]
+  defaultCurrency: Currency
+  defaultTaxPercentage: number
+  defaultDueDate: string
 }
 
-export function InvoiceForm({ initialData = null, onSubmitAction }: InvoiceFormProps) {
-  const [isLoading, setIsLoading] = useState(true); // Still needed for fetching lists
-  const [error, setError] = useState<string | null>(null);
-  const [appSettings, setAppSettings] = useState<AppSettings | null>(null); // Keep for defaults
-  const [issuingEntities, setIssuingEntities] = useState<IssuingEntity[]>([]); // Keep for dropdown
-  const [paymentSources, setPaymentSources] = useState<PaymentSource[]>([]); // Keep for dropdown
-  const [customers, setCustomers] = useState<Customer[]>([]); // Keep for dropdown
-  const [products, setProducts] = useState<Product[]>([]); // Keep for dropdown
+interface Product {
+  id: string
+  sku: string
+  name: string
+  base_price: number
+  base_currency: string
+  unit: string
+  additional_prices?: {
+    currency_code: string
+    price: number
+  }[]
+}
 
-  // --- Form Initialization ---
+export function InvoiceForm({
+  invoice,
+  customers,
+  issuingEntities,
+  paymentSources,
+  products,
+  defaultCurrency,
+  defaultTaxPercentage,
+  defaultDueDate
+}: InvoiceFormProps) {
+  const router = useRouter()
+  const { toast } = useToast()
+  const [submitting, setSubmitting] = useState(false)
+  const [currency, setCurrency] = useState<Currency>(
+    (invoice?.currency_code as Currency) || defaultCurrency
+  )
+  
+  // Get customer preferred currency
+  const getCustomerCurrency = (customerId: string): Currency => {
+    const customer = customers.find(c => c.id === customerId)
+    return customer?.preferred_currency || defaultCurrency
+  }
+
+  // Set up form with default values
   const form = useForm<InvoiceFormValues>({
     resolver: zodResolver(invoiceFormSchema),
-    /* eslint-disable @typescript-eslint/no-explicit-any */
-    defaultValues: useMemo(() => {
-      let mappedLineItems: FormLineItemFields[];
-      if (initialData && initialData.line_items && Array.isArray(initialData.line_items)) {
-        // Explicitly type initialData.line_items before mapping
-        const dbLineItems: DbInvoiceLineItem[] = initialData.line_items as DbInvoiceLineItem[];
-        mappedLineItems = dbLineItems.map((item: DbInvoiceLineItem): FormLineItemFields => ({
-          productId: item.product_id || "",
-          description: item.description || "",
-          quantity: item.quantity || 1,
-          unitPrice: item.unit_price || 0,
-        }));
-      } else {
-        mappedLineItems = [{ productId: "", description: "", quantity: 1, unitPrice: 0 }];
-      }
-
-      if (initialData) {
-        return {
-          entityId: initialData.issuing_entity_id || "",
-          customerId: initialData.customer_id || "",
-          issueDate: initialData.issue_date ? format(parseISO(initialData.issue_date), 'yyyy-MM-dd') : "",
-          dueDate: initialData.due_date ? format(parseISO(initialData.due_date), 'yyyy-MM-dd') : "",
-          currency: initialData.currency_code || "USD",
-          paymentSourceId: initialData.payment_source_id || "",
-          taxPercent: initialData.tax_percentage ?? 0,
-          notes: initialData.notes || "",
-          lineItems: mappedLineItems.length > 0 ? mappedLineItems : [{ productId: "", description: "", quantity: 1, unitPrice: 0 }],
-        };
-      } else {
-        return {
-          entityId: "",
-          customerId: "",
-          issueDate: format(new Date(), 'yyyy-MM-dd'),
-          dueDate: format(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd'),
-          currency: "USD",
-          paymentSourceId: "",
-          taxPercent: 0,
-          notes: "",
-          lineItems: [{ productId: "", description: "", quantity: 1, unitPrice: 0 }], // Default for new
-        };
-      }
-    }, [initialData]),
-    /* eslint-enable @typescript-eslint/no-explicit-any */
-  });
-
-  // useFieldArray's 'fields' will have 'id' (for React key) + properties from defaultValues/appended items
-  // The 'total' property for display can be added when appending or calculated in render
-  const { fields, append, remove } = useFieldArray({
-    control: form.control,
-    name: "lineItems",
-  });
-
-  // --- Data Fetching for Dropdowns & Defaults (runs on mount) ---
-  useEffect(() => {
-    let isMounted = true; // Prevent state updates on unmounted component
-    async function loadDropdownDataAndDefaults() {
-      setIsLoading(true);
-      setError(null);
-      try {
-        // Explicitly type the results of Promise.all
-        const [
-          settings,
-          entities,
-          sources,
-          fetchedCustomers,
-          fetchedProducts
-        ]: [
-          AppSettings | null,
-          IssuingEntity[],
-          PaymentSource[],
-          Customer[],
-          Product[]
-        ] = await Promise.all([
-          getAppSettings(),
-          getIssuingEntities(),
-          getPaymentSources(),
-          getCustomers(), // Mock function returns Promise<Customer[]>
-          getProducts(),  // Mock function returns Promise<Product[]>
-        ]);
-
-        if (!isMounted) return; // Exit if component unmounted
-
-        setAppSettings(settings);
-        setIssuingEntities(entities);
-        setPaymentSources(sources);
-        setCustomers(fetchedCustomers);
-        setProducts(fetchedProducts);
-
-        // --- Set Defaults ONLY IF creating a NEW invoice (no initialData) ---
-        if (!initialData) {
-          const primaryEntity = entities.find(e => e.is_primary) || entities[0];
-          const defaultPaymentTerms = settings?.default_invoice_payment_terms_days;
-          const defaultTax = settings?.default_tax_percentage;
-          const defaultNotes = settings?.default_invoice_notes;
-          const baseCurrency = settings?.base_currency || "USD";
-
-          const today = format(new Date(), 'yyyy-MM-dd');
-          const initialDueDate = calculateDueDate(today, defaultPaymentTerms);
-
-          let initialPaymentSourceId = "";
-          if (primaryEntity) {
-            const primarySourceForEntity = sources.find(s => s.issuing_entity_id === primaryEntity.id && s.is_primary_for_entity);
-            initialPaymentSourceId = primarySourceForEntity?.id || sources.find(s => s.issuing_entity_id === primaryEntity.id)?.id || "";
-          }
-
-          // Use reset to update defaults for a new form, preserving any user input if needed
-          // Or use setValue for specific fields if reset is too broad
-          form.reset({
-            ...form.getValues(), // Keep existing values (like line items if user added one)
-            entityId: form.getValues('entityId') || primaryEntity?.id || "", // Only set if not already set
-            issueDate: form.getValues('issueDate') || today,
-            dueDate: form.getValues('dueDate') || initialDueDate,
-            currency: form.getValues('currency') || baseCurrency,
-            paymentSourceId: form.getValues('paymentSourceId') || initialPaymentSourceId,
-            taxPercent: form.getValues('taxPercent') ?? defaultTax ?? 0,
-            notes: form.getValues('notes') || defaultNotes || "",
-          }, { keepDefaultValues: false }); // Ensure defaultValues are updated
+    defaultValues: {
+      entityId: invoice?.entity_id || '',
+      customerId: invoice?.customer_id || '',
+      issueDate: invoice?.issue_date 
+        ? new Date(invoice.issue_date).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0],
+      dueDate: invoice?.due_date
+        ? new Date(invoice.due_date).toISOString().split('T')[0]
+        : defaultDueDate,
+      currency: (invoice?.currency_code as Currency) || defaultCurrency,
+      paymentSourceId: invoice?.payment_source_id || '',
+      taxPercent: invoice?.tax_percentage || defaultTaxPercentage,
+      notes: invoice?.notes || '',
+      lineItems: invoice?.items?.map(item => ({
+        id: item.id,
+        productId: item.product_id,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unit_price,
+        fxRate: item.fx_rate
+      })) || [
+        // Default empty line item if none provided
+        {
+          productId: '',
+          description: '',
+          quantity: 1,
+          unitPrice: 0
         }
-
-      } catch (e) {
-        console.error("Failed to load initial data for invoice form:", e);
-        if (isMounted) {
-          setError("Failed to load required data. Please try again later.");
-          toast({ title: "Error", description: "Could not load necessary data.", variant: "destructive" });
-        }
-      } finally {
-        if (isMounted) setIsLoading(false);
-      }
+      ]
     }
+  })
+  
+  // Extract form values for calculations
+  const formValues = form.getValues()
+  
+  // Calculate totals based on current form values
+  const { subtotalAmount, taxAmount, totalAmount } = calculateInvoiceTotals(formValues)
 
-    loadDropdownDataAndDefaults();
+  // Handle customer change to update currency
+  const handleCustomerChange = (customerId: string) => {
+    form.setValue('customerId', customerId)
+    // Update currency to match customer's preferred currency
+    const newCurrency = getCustomerCurrency(customerId)
+    form.setValue('currency', newCurrency)
+    setCurrency(newCurrency)
+  }
+  
+  // Handle currency change
+  const handleCurrencyChange = (value: string) => {
+    const newCurrency = value as Currency
+    form.setValue('currency', newCurrency)
+    setCurrency(newCurrency)
+  }
 
-    return () => { isMounted = false; }; // Cleanup function
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialData, form.reset, form.getValues]); // Depend on initialData to know if it's create/edit
-
-
-  // --- Watched Values & Derived State ---
-  // (Keep watched values and derived state logic as is)
-  const watchedLineItems = form.watch("lineItems");
-  const watchedTaxPercent = form.watch("taxPercent");
-  const watchedCurrency = form.watch("currency"); // Keep watching currency
-  const watchedEntityId = form.watch("entityId");
-  const watchedPaymentSourceId = form.watch("paymentSourceId");
-  const watchedIssueDate = form.watch("issueDate");
-
-  const subtotal = useMemo(() => watchedLineItems.reduce((sum, item) => sum + ((item.quantity || 0) * (item.unitPrice || 0)), 0), [watchedLineItems]);
-  const taxAmount = useMemo(() => subtotal * ((watchedTaxPercent || 0) / 100), [subtotal, watchedTaxPercent]);
-  const total = useMemo(() => subtotal + taxAmount, [subtotal, taxAmount]);
-
-  const selectedPaymentSource = useMemo(() => paymentSources.find(ps => ps.id === watchedPaymentSourceId), [paymentSources, watchedPaymentSourceId]);
-  const paymentInstructions = useMemo(() => generatePaymentInstructions(selectedPaymentSource), [selectedPaymentSource]);
-
-  // --- Effects for Form Logic ---
-  // Update line item totals effect can be removed if 'total' is purely display and calculated in render/memo
-
-  // Update payment source options effect (keep as is)
-  useEffect(() => {
-    const currentSource = paymentSources.find(ps => ps.id === form.getValues("paymentSourceId"));
-    if (currentSource?.issuing_entity_id !== watchedEntityId) {
-      const firstValidSourceForEntity = paymentSources.find(ps => ps.issuing_entity_id === watchedEntityId && ps.is_primary_for_entity)
-                                      || paymentSources.find(ps => ps.issuing_entity_id === watchedEntityId);
-      form.setValue("paymentSourceId", firstValidSourceForEntity?.id || "", { shouldValidate: true });
-    }
-  }, [watchedEntityId, paymentSources, form]);
-
-  // Recalculate due date effect (keep as is, but only if creating new)
-  useEffect(() => {
-    // Only recalculate due date based on defaults if it's a new invoice
-    if (!initialData && watchedIssueDate) {
-      const defaultPaymentTerms = appSettings?.default_invoice_payment_terms_days;
-      const newDueDate = calculateDueDate(watchedIssueDate, defaultPaymentTerms);
-      if (newDueDate !== form.getValues('dueDate')) {
-          form.setValue('dueDate', newDueDate, { shouldValidate: true });
-      }
-    }
-  }, [watchedIssueDate, appSettings, form, initialData]);
-
-
-  // --- Handlers ---
-  // (Keep formatCurrency and handleProductChange handlers as they are)
-  const formatCurrency = (amount: number) => {
+  // Handle form submission
+  const onSubmit = async (data: InvoiceFormValues) => {
+    setSubmitting(true)
+    
     try {
-       return new Intl.NumberFormat(undefined, { style: 'currency', currency: watchedCurrency || 'USD' }).format(amount);
-    } catch (_) {
-       return `${watchedCurrency || '$'}${amount.toFixed(2)}`;
-    }
-  };
-
-  const handleProductChange = (index: number, productId: string) => {
-    const selectedProduct = products.find((p) => p.id === productId || p.sku === productId);
-    if (selectedProduct) {
-      form.setValue(`lineItems.${index}.description`, selectedProduct.description || selectedProduct.name, { shouldValidate: true });
-      // TODO: Implement multi-currency price logic here
-      form.setValue(`lineItems.${index}.unitPrice`, selectedProduct.base_price, { shouldValidate: true });
-    }
-  };
-
-  // Use the passed server action for submission
-  async function handleFormSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await form.handleSubmit(async (data) => {
-      console.log("Form data validated:", data);
-      // Need to pass line items correctly, FormData might stringify them
-      const formData = new FormData();
-      Object.entries(data).forEach(([key, value]) => {
-        if (key === 'lineItems') {
-          // Stringify line items for FormData (server action needs to parse)
-          formData.append(key, JSON.stringify(value));
-        } else if (value !== null && value !== undefined) {
-          formData.append(key, String(value));
-        }
-      });
-
-      try {
-        const result = await onSubmitAction(formData);
-        // Handle result (e.g., show toast on error)
-        if (result?.error) {
-          toast({ title: "Submission Error", description: result.error, variant: "destructive" });
-        } else {
-          toast({ title: "Success", description: `Invoice ${initialData ? 'updated' : 'created'} successfully.` });
-          // Redirect is handled by server action
-        }
-      } catch (error) {
-        console.error("Submission failed:", error);
-        toast({ title: "Submission Error", description: "An unexpected error occurred.", variant: "destructive" });
+      // Create FormData object for server action
+      const formData = new FormData()
+      
+      // Add basic fields
+      formData.append('entityId', data.entityId)
+      formData.append('customerId', data.customerId)
+      formData.append('issueDate', data.issueDate)
+      formData.append('dueDate', data.dueDate)
+      formData.append('currency', data.currency)
+      formData.append('paymentSourceId', data.paymentSourceId)
+      formData.append('taxPercent', data.taxPercent.toString())
+      
+      if (data.notes) {
+        formData.append('notes', data.notes)
       }
-    })(event); // Pass the event to RHF's handleSubmit
-  }
-
-
-  // --- Render Logic ---
-  // (Keep Skeleton and error rendering as is)
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-1/4" />
-        <Card><CardContent className="pt-6 space-y-4"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></CardContent></Card>
-        <Card><CardContent className="pt-6 space-y-4"><Skeleton className="h-20 w-full" /></CardContent></Card>
-        <Card><CardContent className="pt-6 space-y-4"><Skeleton className="h-16 w-full" /></CardContent></Card>
-        <Card><CardContent className="pt-6 space-y-4"><Skeleton className="h-16 w-full" /></CardContent></Card>
-      </div>
-    );
-  }
-
-  if (error) {
-    return <p className="text-red-500 p-4">{error}</p>;
+      
+      // Add line items as JSON string
+      formData.append('lineItems', JSON.stringify(data.lineItems))
+      
+      let result
+      if (invoice?.id) {
+        // Update existing invoice
+        result = await updateInvoice(invoice.id, formData)
+      } else {
+        // Create new invoice
+        result = await createInvoice(formData)
+      }
+      
+      if (result?.error) {
+        toast({
+          title: "Error",
+          description: result.error,
+          variant: "destructive"
+        })
+        setSubmitting(false)
+      }
+      
+      // Server action handles redirect on success
+      
+    } catch (error) {
+      console.error("Form submission error:", error)
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred. Please try again.",
+        variant: "destructive"
+      })
+      setSubmitting(false)
+    }
   }
 
   return (
     <Form {...form}>
-      {/* Use handleFormSubmit which wraps RHF's handleSubmit */}
-      <form onSubmit={handleFormSubmit} className="space-y-8">
-        {/* Header Fields Card */}
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+        {/* Basic information */}
         <Card>
-          <CardContent className="pt-6">
-            {/* Keep all FormField definitions as they are */}
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              <FormField
-                control={form.control}
-                name="entityId"
-                // Add key prop if needed for re-rendering on default value change
-                key={`entityId-${form.formState.defaultValues?.entityId}`}
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Issuing Entity <span className="text-red-500">*</span></FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select entity" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {issuingEntities.map((entity) => (
-                          <SelectItem key={entity.id} value={entity.id}>
-                            {entity.entity_name} {entity.is_primary ? '(Primary)' : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
+          <CardHeader>
+            <CardTitle>
+              {invoice?.id ? 'Edit Invoice' : 'New Invoice'}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Entity, customer and payment source selectors */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <Label htmlFor="entity-selector">Issuing Entity</Label>
+                <IssuingEntitySelector
+                  value={form.getValues('entityId')}
+                  onValueChange={(value) => form.setValue('entityId', value)}
+                  items={issuingEntities}
+                  disabled={submitting}
+                />
+                {form.formState.errors.entityId && (
+                  <p className="text-sm text-red-500">{form.formState.errors.entityId.message}</p>
                 )}
-              />
-              <FormField
-                control={form.control}
-                name="customerId"
-                key={`customerId-${form.formState.defaultValues?.customerId}`}
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Customer <span className="text-red-500">*</span></FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select customer" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {customers.map((customer) => (
-                          <SelectItem key={customer.id} value={customer.id}>
-                            {customer.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="customer-selector">Customer</Label>
+                <CustomerSelector
+                  value={form.getValues('customerId')}
+                  onValueChange={handleCustomerChange}
+                  items={customers}
+                  disabled={submitting}
+                />
+                {form.formState.errors.customerId && (
+                  <p className="text-sm text-red-500">{form.formState.errors.customerId.message}</p>
                 )}
-              />
-              <FormField
-                control={form.control}
-                name="issueDate"
-                key={`issueDate-${form.formState.defaultValues?.issueDate}`}
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Issue Date <span className="text-red-500">*</span></FormLabel>
-                    <FormControl>
-                      <Input type="date" {...field} value={field.value || ''} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="payment-source-selector">Payment Source</Label>
+                <PaymentSourceSelector
+                  value={form.getValues('paymentSourceId')}
+                  onValueChange={(value) => form.setValue('paymentSourceId', value)}
+                  items={paymentSources}
+                  disabled={submitting}
+                />
+                {form.formState.errors.paymentSourceId && (
+                  <p className="text-sm text-red-500">{form.formState.errors.paymentSourceId.message}</p>
                 )}
-              />
-              <FormField
-                control={form.control}
-                name="dueDate"
-                key={`dueDate-${form.formState.defaultValues?.dueDate}`}
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Due Date <span className="text-red-500">*</span></FormLabel>
-                    <FormControl>
-                      <Input type="date" {...field} value={field.value || ''} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="currency-selector">Currency</Label>
+                <Select
+                  value={currency}
+                  onValueChange={handleCurrencyChange}
+                  disabled={submitting}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select currency" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ALLOWED_CURRENCIES.map((currency) => (
+                      <SelectItem key={currency} value={currency}>
+                        {currency}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {form.formState.errors.currency && (
+                  <p className="text-sm text-red-500">{form.formState.errors.currency.message}</p>
                 )}
-              />
-              <FormField
-                control={form.control}
-                name="currency"
-                key={`currency-${form.formState.defaultValues?.currency}`}
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Currency <span className="text-red-500">*</span></FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select currency" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {ALLOWED_CURRENCIES.map((currencyCode) => (
-                          <SelectItem key={currencyCode} value={currencyCode}>
-                            {currencyCode}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
+              </div>
+            </div>
+            
+            {/* Dates and tax */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="space-y-2">
+                <Label htmlFor="issue-date">Issue Date</Label>
+                <Input
+                  id="issue-date"
+                  type="date"
+                  {...form.register('issueDate')}
+                  disabled={submitting}
+                />
+                {form.formState.errors.issueDate && (
+                  <p className="text-sm text-red-500">{form.formState.errors.issueDate.message}</p>
                 )}
-              />
-              <FormField
-                control={form.control}
-                name="paymentSourceId"
-                key={`paymentSourceId-${form.formState.defaultValues?.paymentSourceId}`}
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Payment Source <span className="text-red-500">*</span></FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select payment source" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {paymentSources
-                          .filter((source) => source.issuing_entity_id === watchedEntityId)
-                          .map((source) => (
-                            <SelectItem key={source.id} value={source.id}>
-                              {source.name} {source.is_primary_for_entity ? '(Primary)' : ''}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="due-date">Due Date</Label>
+                <Input
+                  id="due-date"
+                  type="date"
+                  {...form.register('dueDate')}
+                  disabled={submitting}
+                />
+                {form.formState.errors.dueDate && (
+                  <p className="text-sm text-red-500">{form.formState.errors.dueDate.message}</p>
                 )}
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="tax-percent">Tax %</Label>
+                <Input
+                  id="tax-percent"
+                  type="number"
+                  step={0.01}
+                  min={0}
+                  max={100}
+                  {...form.register('taxPercent', { valueAsNumber: true })}
+                  disabled={submitting}
+                />
+                {form.formState.errors.taxPercent && (
+                  <p className="text-sm text-red-500">{form.formState.errors.taxPercent.message}</p>
+                )}
+              </div>
+            </div>
+            
+            {/* Notes */}
+            <div className="space-y-2">
+              <Label htmlFor="notes">Notes</Label>
+              <Textarea
+                id="notes"
+                {...form.register('notes')}
+                disabled={submitting}
+                placeholder="Optional notes or additional information..."
               />
+              {form.formState.errors.notes && (
+                <p className="text-sm text-red-500">{form.formState.errors.notes.message}</p>
+              )}
             </div>
           </CardContent>
         </Card>
-
-        {/* Line Items Card */}
+        
+        {/* Line items */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Line Items</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <LineItemEditor
+              value={form.getValues('lineItems')}
+              onChange={(items) => form.setValue('lineItems', items)}
+              currency={currency}
+              products={products}
+              disabled={submitting}
+            />
+            {form.formState.errors.lineItems && (
+              <p className="text-sm text-red-500 mt-2">
+                {form.formState.errors.lineItems.message}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+        
+        {/* Totals and submission */}
         <Card>
           <CardContent className="pt-6">
-            <h3 className="mb-4 text-lg font-medium">Line Items</h3>
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Product</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead className="w-[100px]">Qty</TableHead>
-                    <TableHead className="w-[150px]">Unit Price</TableHead>
-                    <TableHead className="w-[150px]">Total</TableHead>
-                    <TableHead className="w-[50px]"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {fields.map((field, index) => (
-                    <TableRow key={field.id}>
-                      <TableCell>
-                        <FormField
-                          control={form.control}
-                          name={`lineItems.${index}.productId`}
-                          key={`${field.id}-productId`} // Add key for stability
-                          render={({ field: itemField }) => (
-                            <FormItem>
-                              <Select
-                                onValueChange={(value) => {
-                                  itemField.onChange(value);
-                                  handleProductChange(index, value);
-                                }}
-                                value={itemField.value}
-                                defaultValue={itemField.value}
-                              >
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select product" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  {products.map((product) => (
-                                    <SelectItem key={product.id} value={product.id}>
-                                      {product.name} ({product.sku})
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <FormField
-                          control={form.control}
-                          name={`lineItems.${index}.description`}
-                          key={`${field.id}-description`}
-                          render={({ field: itemField }) => (
-                            <FormItem>
-                              <FormControl>
-                                <Input placeholder="Description" {...itemField} value={itemField.value || ''} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <FormField
-                          control={form.control}
-                          name={`lineItems.${index}.quantity`}
-                          key={`${field.id}-quantity`}
-                          render={({ field: itemField }) => (
-                            <FormItem>
-                              <FormControl>
-                                <Input
-                                  type="number"
-                                  {...itemField}
-                                  value={itemField.value ?? 1} // Use ?? for potential 0 value
-                                  onChange={(e) => itemField.onChange(Number.parseInt(e.target.value) || 1)}
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <FormField
-                          control={form.control}
-                          name={`lineItems.${index}.unitPrice`}
-                          key={`${field.id}-unitPrice`}
-                          render={({ field: itemField }) => (
-                            <FormItem>
-                              <FormControl>
-                                <Input
-                                  type="number"
-                                  step="0.01"
-                                  {...itemField}
-                                  value={itemField.value ?? 0} // Use ??
-                                  onChange={(e) => itemField.onChange(Number.parseFloat(e.target.value) || 0)}
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </TableCell>
-                      {/* Calculate total directly for display */}
-                      <TableCell className="text-right">
-                        {formatCurrency((watchedLineItems[index]?.quantity || 0) * (watchedLineItems[index]?.unitPrice || 0))}
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => fields.length > 1 && remove(index)}
-                          disabled={fields.length === 1}
-                          aria-label="Remove line item"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="mt-4"
-              // Ensure appended item matches schema (FormLineItemSchemaType)
-              onClick={() => append({ productId: "", description: "", quantity: 1, unitPrice: 0 })}
-            >
-              Add Line Item
-            </Button>
-
-            {/* Totals Section */}
-            <div className="mt-6 space-y-4">
-              <div className="flex justify-end">
-                <div className="w-full max-w-xs space-y-2">
-                  <div className="flex justify-between">
-                    <span>Subtotal:</span>
-                    <span>{formatCurrency(subtotal)}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                     <Label htmlFor="taxPercentInput" className="mr-2 shrink-0">Tax (%):</Label>
-                    <FormField
-                      control={form.control}
-                      name="taxPercent"
-                      key={`taxPercent-${form.formState.defaultValues?.taxPercent}`}
-                      render={({ field }) => (
-                        <FormItem className="flex-grow">
-                          <FormControl>
-                            <Input
-                              id="taxPercentInput"
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              max="100"
-                              className="w-full text-right"
-                              {...field}
-                              value={field.value ?? 0} // Use ??
-                              onChange={(e) => field.onChange(Number.parseFloat(e.target.value) || 0)}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                   <div className="flex justify-between text-muted-foreground text-sm">
-                     <span>Tax Amount:</span>
-                     <span>{formatCurrency(taxAmount)}</span>
-                   </div>
-                  <Separator />
-                  <div className="flex justify-between font-bold text-lg">
-                    <span>Total:</span>
-                    <span>{formatCurrency(total)}</span>
-                  </div>
-                </div>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span>Subtotal:</span>
+                <span>{formatCurrency(subtotalAmount, currency)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Tax ({form.getValues('taxPercent')}%):</span>
+                <span>{formatCurrency(taxAmount, currency)}</span>
+              </div>
+              <div className="flex justify-between font-bold">
+                <span>Total:</span>
+                <span>{formatCurrency(totalAmount, currency)}</span>
               </div>
             </div>
           </CardContent>
+          <CardFooter className="flex justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => router.back()}
+              disabled={submitting}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={submitting}>
+              {submitting ? 'Saving...' : invoice?.id ? 'Update Invoice' : 'Create Invoice'}
+            </Button>
+          </CardFooter>
         </Card>
-
-        {/* Notes Card */}
-        <Card>
-          <CardContent className="pt-6">
-            <FormField
-              control={form.control}
-              name="notes"
-              key={`notes-${form.formState.defaultValues?.notes}`}
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Notes</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      placeholder="Enter any additional notes or information (e.g., terms, conditions)"
-                      rows={4}
-                      {...field}
-                      value={field.value || ''}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </CardContent>
-        </Card>
-
-        {/* Payment Instructions Card */}
-        <Card>
-          <CardContent className="pt-6">
-            <h3 className="mb-2 text-lg font-medium">Payment Instructions</h3>
-            <div className="rounded-md bg-muted p-4">
-              <pre className="whitespace-pre-wrap text-sm font-mono">{paymentInstructions}</pre>
-            </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Instructions based on selected payment source.{" "}
-              <a href="/settings/payment-sources" className="underline" target="_blank" rel="noopener noreferrer">
-                Manage Sources
-              </a>
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Submit Button */}
-        <div className="flex justify-end">
-          {/* TODO: Add Cancel button */}
-          <Button type="submit" disabled={form.formState.isSubmitting || isLoading}>
-            {form.formState.isSubmitting ? "Saving..." : (initialData ? "Update Invoice" : "Create Invoice")}
-          </Button>
-        </div>
       </form>
     </Form>
-  );
+  )
 }
