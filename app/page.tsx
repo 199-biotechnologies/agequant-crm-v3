@@ -39,10 +39,15 @@ export default async function Dashboard() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <form action={() => { 'use server'; return; /* Forces a server refresh */ }}>
+        <form action={async () => { 
+          "use server" 
+          // Import in the action to prevent server component issues
+          const { refreshDashboard } = await import('./dashboard/refresh-action')
+          await refreshDashboard()
+        }}>
           <Button type="submit" variant="outline" size="sm">
             <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
+            Refresh Data
           </Button>
         </form>
       </div>

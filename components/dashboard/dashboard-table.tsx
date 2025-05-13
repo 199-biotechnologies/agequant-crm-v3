@@ -46,21 +46,25 @@ export function DashboardTable({ type, data }: DashboardTableProps) {
     }
   }
 
-  const getActionButton = (itemType: string /*, _id: string */) => {
+  const getActionButton = (itemType: string, id: string) => {
     if (itemType === "invoice") {
       return (
-        <Button size="sm" variant="outline">
-          <Send className="mr-1 h-3 w-3" />
-          Send Reminder
+        <Button size="sm" variant="outline" asChild>
+          <Link href={`/invoices/${id}`}>
+            <Send className="mr-1 h-3 w-3" />
+            View Details
+          </Link>
         </Button>
       )
     }
 
     if (itemType === "quote") {
       return (
-        <Button size="sm" variant="outline">
-          <FileText className="mr-1 h-3 w-3" />
-          Convert to Invoice
+        <Button size="sm" variant="outline" asChild>
+          <Link href={`/quotes/${id}`}>
+            <FileText className="mr-1 h-3 w-3" />
+            View Details
+          </Link>
         </Button>
       )
     }
@@ -98,7 +102,7 @@ export function DashboardTable({ type, data }: DashboardTableProps) {
                     {item.status}
                   </Badge>
                 </TableCell>
-                <TableCell>{getActionButton(type /*, item.id */)}</TableCell>
+                <TableCell>{getActionButton(type, item.id)}</TableCell>
               </TableRow>
             ))
           ) : (
