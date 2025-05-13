@@ -5,7 +5,6 @@ import { ArrowUpDown, MoreHorizontal } from "lucide-react"
 import Link from "next/link"
 
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +14,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
+import { StatusBadge } from "@/components/ui/status-badge"
+import { QuoteStatus } from "@/lib/constants"
+
 // Define the quote data type
 export type Quote = {
   id: string
@@ -22,7 +24,7 @@ export type Quote = {
   customer: string
   issueDate: string
   expiryDate: string
-  status: "Draft" | "Sent" | "Accepted" | "Rejected"
+  status: QuoteStatus
   total: string
 }
 
@@ -33,38 +35,6 @@ const formatDate = (dateString: string) => {
     day: "numeric",
     year: "numeric",
   })
-}
-
-// Get status badge styling
-const getStatusBadge = (status: Quote["status"]) => {
-  switch (status) {
-    case "Draft":
-      return (
-        <Badge variant="outline" className="bg-gray-100 text-gray-800">
-          Draft
-        </Badge>
-      )
-    case "Sent":
-      return (
-        <Badge variant="outline" className="bg-blue-100 text-blue-800">
-          Sent
-        </Badge>
-      )
-    case "Accepted":
-      return (
-        <Badge variant="outline" className="bg-emerald-100 text-emerald-800">
-          Accepted
-        </Badge>
-      )
-    case "Rejected":
-      return (
-        <Badge variant="outline" className="bg-rose-100 text-rose-800">
-          Rejected
-        </Badge>
-      )
-    default:
-      return <Badge variant="outline">{status}</Badge>
-  }
 }
 
 // Define the columns
@@ -134,7 +104,7 @@ export const QuoteColumns: ColumnDef<Quote>[] = [
         </Button>
       )
     },
-    cell: ({ row }) => getStatusBadge(row.original.status),
+    cell: ({ row }) => <StatusBadge status={row.original.status} entityType="quote" />,
   },
   {
     accessorKey: "total",
