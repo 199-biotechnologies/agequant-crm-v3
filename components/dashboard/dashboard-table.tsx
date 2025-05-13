@@ -82,24 +82,32 @@ export function DashboardTable({ type, data }: DashboardTableProps) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {data.map((item) => (
-            <TableRow key={item.id}>
-              <TableCell className="font-medium">
-                <Link href={`/${type}s/${item.id}`} className="hover:underline">
-                  {item.id}
-                </Link>
+          {data.length > 0 ? (
+            data.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell className="font-medium">
+                  <Link href={`/${type}s/${item.id}`} className="hover:underline">
+                    {item.id}
+                  </Link>
+                </TableCell>
+                <TableCell>{item.customer}</TableCell>
+                <TableCell>{formatDate(item.dueDate)}</TableCell>
+                <TableCell>{item.total}</TableCell>
+                <TableCell>
+                  <Badge variant="outline" className={cn("font-normal", getStatusColor(item.status))}>
+                    {item.status}
+                  </Badge>
+                </TableCell>
+                <TableCell>{getActionButton(type /*, item.id */)}</TableCell>
+              </TableRow>
+            ))
+          ) : (
+            <TableRow>
+              <TableCell colSpan={6} className="h-24 text-center">
+                No {type === "invoice" ? "overdue invoices" : "expiring quotes"} found
               </TableCell>
-              <TableCell>{item.customer}</TableCell>
-              <TableCell>{formatDate(item.dueDate)}</TableCell>
-              <TableCell>{item.total}</TableCell>
-              <TableCell>
-                <Badge variant="outline" className={cn("font-normal", getStatusColor(item.status))}>
-                  {item.status}
-                </Badge>
-              </TableCell>
-              <TableCell>{getActionButton(type /*, item.id */)}</TableCell>
             </TableRow>
-          ))}
+          )}
         </TableBody>
       </Table>
     </div>

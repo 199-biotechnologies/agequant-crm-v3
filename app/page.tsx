@@ -1,5 +1,4 @@
 import { ArrowUp, Clock, Package, Send, RefreshCw } from "lucide-react"
-
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { DashboardKPI } from "@/components/dashboard/dashboard-kpi"
@@ -7,50 +6,73 @@ import { DashboardTable } from "@/components/dashboard/dashboard-table"
 import { RevenueChart } from "@/components/dashboard/revenue-chart"
 import { QuickAddButtons } from "@/components/dashboard/quick-add-buttons"
 import { RecentlyUpdated } from "@/components/dashboard/recently-updated"
+import { 
+  getOverdueInvoices,
+  getExpiringQuotes,
+  getTotalSentMTD,
+  getOutstandingAmount,
+  getAcceptedQuotes30d,
+  getTopProduct,
+  getRecentlyUpdated
+} from "./dashboard/actions"
 
-export default function Dashboard() {
+export default async function Dashboard() {
+  // Fetch all dashboard data
+  const [
+    overdueInvoices,
+    expiringQuotes,
+    totalSentMTD,
+    outstandingAmount,
+    acceptedQuotes30d,
+    topProduct,
+    recentlyUpdated
+  ] = await Promise.all([
+    getOverdueInvoices(),
+    getExpiringQuotes(),
+    getTotalSentMTD(),
+    getOutstandingAmount(),
+    getAcceptedQuotes30d(),
+    getTopProduct(),
+    getRecentlyUpdated()
+  ])
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <Button variant="outline" size="sm">
-          <RefreshCw className="mr-2 h-4 w-4" />
-          Refresh
-        </Button>
+        <form action={() => { 'use server'; return; /* Forces a server refresh */ }}>
+          <Button type="submit" variant="outline" size="sm">
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Refresh
+          </Button>
+        </form>
       </div>
 
       {/* KPI Strip */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <DashboardKPI
           title="Total Sent (MTD)"
-          value="$24,780"
-          trend="+12.5%"
-          trendType="up"
+          value={totalSentMTD.value}
           icon={Send}
           href="/invoices?filter=sent&period=mtd"
         />
         <DashboardKPI
           title="Outstanding"
-          value="$8,450"
-          trend="-3.2%"
-          trendType="down"
+          value={outstandingAmount.value}
           icon={ArrowUp}
           href="/invoices?filter=outstanding"
         />
         <DashboardKPI
           title="Accepted Quotes (30d)"
-          value="$15,200"
-          trend="+8.1%"
-          trendType="up"
+          value={acceptedQuotes30d.value}
           icon={Clock}
           href="/quotes?filter=accepted&period=30d"
         />
         <DashboardKPI
           title="Top Product"
-          value="Premium Plan"
-          secondaryValue="$5,240"
+          value={topProduct.name}
+          secondaryValue={topProduct.value}
           icon={Package}
-          href="/products/PR-H5K3N"
+          href={`/products/${topProduct.sku}`}
         />
       </div>
 
@@ -67,32 +89,7 @@ export default function Dashboard() {
             <CardContent>
               <DashboardTable
                 type="invoice"
-                data={[
-                  {
-                    id: "H5K3N",
-                    customer: "Acme Corp",
-                    date: "2023-05-01",
-                    dueDate: "2023-05-15",
-                    total: "$1,250.00",
-                    status: "Overdue",
-                  },
-                  {
-                    id: "J7M2P",
-                    customer: "Globex Inc",
-                    date: "2023-05-05",
-                    dueDate: "2023-05-20",
-                    total: "$3,450.00",
-                    status: "Overdue",
-                  },
-                  {
-                    id: "K9R4S",
-                    customer: "Initech",
-                    date: "2023-05-10",
-                    dueDate: "2023-05-25",
-                    total: "$2,780.00",
-                    status: "Overdue",
-                  },
-                ]}
+                data={overdueInvoices}
               />
             </CardContent>
           </Card>
@@ -106,32 +103,7 @@ export default function Dashboard() {
             <CardContent>
               <DashboardTable
                 type="quote"
-                data={[
-                  {
-                    id: "Q5K3N",
-                    customer: "Wayne Enterprises",
-                    date: "2023-05-01",
-                    dueDate: "2023-06-01",
-                    total: "$4,250.00",
-                    status: "Sent",
-                  },
-                  {
-                    id: "Q7M2P",
-                    customer: "Stark Industries",
-                    date: "2023-05-05",
-                    dueDate: "2023-06-05",
-                    total: "$7,450.00",
-                    status: "Sent",
-                  },
-                  {
-                    id: "Q9R4S",
-                    customer: "Umbrella Corp",
-                    date: "2023-05-10",
-                    dueDate: "2023-06-10",
-                    total: "$5,780.00",
-                    status: "Sent",
-                  },
-                ]}
+                data={expiringQuotes}
               />
             </CardContent>
           </Card>
@@ -168,7 +140,7 @@ export default function Dashboard() {
           <CardDescription>Latest 10 changes</CardDescription>
         </CardHeader>
         <CardContent>
-          <RecentlyUpdated />
+          <RecentlyUpdated items={recentlyUpdated} />
         </CardContent>
       </Card>
     </div>

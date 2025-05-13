@@ -2,56 +2,21 @@ import Link from "next/link"
 import { FileText, FileCheck, Users, Package } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 
-// Mock data for recently updated items
-const recentItems = [
-  {
-    id: "H5K3N",
-    type: "invoice",
-    title: "Invoice #H5K3N for Acme Corp",
-    action: "created",
-    timestamp: "2023-05-28T14:32:00Z",
-    user: "John Doe",
-    userInitials: "JD",
-  },
-  {
-    id: "Q7M2P",
-    type: "quote",
-    title: "Quote #Q7M2P for Stark Industries",
-    action: "updated",
-    timestamp: "2023-05-28T13:15:00Z",
-    user: "Jane Smith",
-    userInitials: "JS",
-  },
-  {
-    id: "CUST-123",
-    type: "customer",
-    title: "Wayne Enterprises",
-    action: "created",
-    timestamp: "2023-05-28T11:45:00Z",
-    user: "John Doe",
-    userInitials: "JD",
-  },
-  {
-    id: "PR-H5K3N",
-    type: "product",
-    title: "Premium Plan",
-    action: "updated",
-    timestamp: "2023-05-28T10:20:00Z",
-    user: "Jane Smith",
-    userInitials: "JS",
-  },
-  {
-    id: "J7M2P",
-    type: "invoice",
-    title: "Invoice #J7M2P for Globex Inc",
-    action: "marked as paid",
-    timestamp: "2023-05-28T09:10:00Z",
-    user: "John Doe",
-    userInitials: "JD",
-  },
-]
+interface RecentItem {
+  id: string
+  type: string
+  title: string
+  action: string
+  timestamp: string
+  user: string
+  userInitials: string
+}
 
-export function RecentlyUpdated() {
+interface RecentlyUpdatedProps {
+  items: RecentItem[]
+}
+
+export function RecentlyUpdated({ items }: RecentlyUpdatedProps) {
   const getTypeIcon = (type: string) => {
     switch (type) {
       case "invoice":
@@ -93,9 +58,17 @@ export function RecentlyUpdated() {
     })
   }
 
+  if (!items || items.length === 0) {
+    return (
+      <div className="py-4 text-center text-muted-foreground">
+        No recent activity found
+      </div>
+    )
+  }
+  
   return (
     <div className="space-y-4">
-      {recentItems.map((item) => (
+      {items.map((item) => (
         <div key={`${item.type}-${item.id}`} className="flex items-start gap-4">
           <Avatar className="h-8 w-8">
             <AvatarFallback>{item.userInitials}</AvatarFallback>
