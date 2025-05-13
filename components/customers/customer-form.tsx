@@ -1,6 +1,7 @@
 // components/customers/customer-form.tsx
 "use client"
 
+import { useState } from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
 // The Button component is used within FormActions, so we don't need to import it here
@@ -9,6 +10,7 @@ import { Form } from "@/components/ui/form"
 import { customerFormSchema, type CustomerFormData } from "./customer-form-schema"
 import { ALLOWED_CURRENCIES } from "@/lib/constants"
 import { useRouter } from "next/navigation"
+import { ErrorResponse } from "@/lib/utils/error-handler"
 
 // Import our new form components
 import { 
@@ -24,13 +26,18 @@ import {
   FormActions 
 } from "@/components/ui/form-layout"
 
+// Import new form error component
+import { FormError } from "@/components/ui/form-error"
+
 interface CustomerFormProps {
   initialData?: Partial<CustomerFormData> & { public_customer_id?: string | null };
-  serverAction: (formData: FormData) => void | Promise<void>;
+  serverAction: (formData: FormData) => void | Promise<void | ErrorResponse>;
 }
 
 export function CustomerForm({ initialData, serverAction }: CustomerFormProps) {
   const router = useRouter();
+  const [serverError, setServerError] = useState<ErrorResponse | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   const form = useForm<CustomerFormData>({
     resolver: zodResolver(customerFormSchema),
@@ -49,15 +56,63 @@ export function CustomerForm({ initialData, serverAction }: CustomerFormProps) {
   const handleCancel = () => {
     router.push('/customers');
   };
+  
+  // Handle form submission
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    
+    // Clear any previous errors
+    setServerError(null);
+    setIsSubmitting(true);
+    
+    try {
+      // Get the form data
+      const formData = new FormData(e.currentTarget);
+      
+      // Submit the form data to the server action
+      const result = await serverAction(formData);
+      
+      // Check if the result is an error
+      if (result && 'error' in result) {
+        // If there's an error, display it
+        setServerError(result as ErrorResponse);
+        setIsSubmitting(false);
+        
+        // If there are field errors, set them in the form
+        if (result.fieldErrors) {
+          Object.entries(result.fieldErrors).forEach(([field, errors]) => {
+            if (errors && errors.length > 0) {
+              // Use type assertion to match field names to form keys
+              form.setError(field as keyof CustomerFormData, {
+                type: 'server',
+                message: errors[0]
+              });
+            }
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Form submission error:", error);
+      setServerError({
+        error: "An unexpected error occurred. Please try again.",
+      });
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <Form {...form}>
-      <FormContainer onSubmit={() => {
-        // Let the native form submission handle it
-        // This preserves the server action
-      }}>
+      <FormContainer onSubmit={handleSubmit}>
         {initialData?.public_customer_id && (
           <input type="hidden" name="publicCustomerId" value={initialData.public_customer_id} />
+        )}
+        
+        {/* Display server errors at the top of the form */}
+        {serverError && (
+          <FormError 
+            error={serverError} 
+            className="mb-6"
+          />
         )}
         
         <FormSection 
@@ -131,7 +186,7 @@ export function CustomerForm({ initialData, serverAction }: CustomerFormProps) {
           submitLabel={initialData ? "Update Customer" : "Save Customer"}
           cancelAction={handleCancel}
           cancelLabel="Cancel"
-          isSubmitting={form.formState.isSubmitting}
+          isSubmitting={form.formState.isSubmitting || isSubmitting}
         />
         
         {/* Hidden form action */}
