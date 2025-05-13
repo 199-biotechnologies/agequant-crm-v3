@@ -1,37 +1,32 @@
-# Outstanding Work & Considerations: Pricing, FX, and Product Module
+# Outstanding Work & Considerations: Multi-Currency and Document Processing
 
-This document outlines outstanding development tasks and considerations related to the multi-currency pricing system, FX (Foreign Exchange) rate integration, and product page enhancements. It is intended to inform future development and provide context for the team responsible for the application settings.
+This document outlines outstanding development tasks and considerations related to PDF generation, email integration, and payment status tracking.
 
-## 1. System Base Currency Configuration and Accessibility
+## ~~1. System Base Currency Configuration and Accessibility~~ (COMPLETED)
 
-The application's multi-currency logic fundamentally relies on a **System Base Currency**. For current development and testing, **USD** has been assumed and, in some places, hardcoded (e.g., in the product form for FX suggestions).
+~~The application's multi-currency logic fundamentally relies on a **System Base Currency**. For current development and testing, **USD** has been assumed and, in some places, hardcoded (e.g., in the product form for FX suggestions).~~
 
-**Outstanding Work:**
-*   The System Base Currency needs to be formally configurable within the application's settings (as per `docs/front-end-ui.md`, this is planned for "Settings -> Defaults -> Base Currency").
-*   A robust mechanism is required for server-side logic (especially in `app/products/actions.ts`, and future invoice/quote actions) to reliably fetch this configured System Base Currency.
+**✅ Implementation Status:**
+* The System Base Currency is now configurable in the application's settings (Settings -> Defaults -> Base Currency)
+* A robust mechanism has been implemented for server-side logic to fetch the configured System Base Currency
+* The app_settings table has been created to store global application settings including the base currency
+* Default values are properly set if no configuration has been explicitly saved
+* FX conversions and product pricing validation have been implemented based on the base currency setting
 
-**Considerations for Settings Team:**
-*   **Storage:** How will this setting be stored? A dedicated `app_settings` table (e.g., with a single row or a key-value structure) is a common approach. The schema should allow for storing the currency code (e.g., "USD", "EUR").
-*   **Accessibility:** Provide a clear and efficient way for server-side Node.js code (Next.js server actions/API routes) to retrieve the currently configured System Base Currency. This could be a utility function that queries the database.
-*   **Default Value:** Ensure a sensible default (e.g., "USD") is set if no configuration has been explicitly saved by the user.
-*   **Impact:** The successful implementation of FX conversions and validation of additional product prices against the base currency depends on this setting being accessible.
-
-## 2. FX API Integration into Invoice & Quote Line Item Logic
+## ~~2. FX API Integration into Invoice & Quote Line Item Logic~~ (COMPLETED)
 
 The FX API at `/api/fx` is now implemented and provides exchange rates between supported currencies using the ECB as a source.
 
-**Outstanding Work:**
-*   Integrate this FX API into the server actions responsible for creating and updating invoices and quotes.
-*   The logic for determining a product's price on a line item should be:
-    1.  Check if the product has a manual `additional_price` defined for the invoice/quote's currency. If yes, use this price.
-    2.  If not, use the product's `base_price` (which is in the System Base Currency, e.g., USD).
-    3.  If the product's `base_price` is used AND the invoice/quote currency is *different* from the System Base Currency:
-        *   Call the `/api/fx?base={SystemBaseCurrency}&target={DocumentCurrency}` endpoint.
-        *   Convert the `base_price` using the fetched FX rate.
-    4.  The FX rate used for any conversion **must be stored on the line item itself** for historical accuracy and auditing (as per `docs/front-end-ui.md`).
-
-**Considerations for Settings Team:**
-*   The invoice/quote modules will critically depend on the System Base Currency (see point 1) being available to correctly call the `/api/fx` endpoint (i.e., to know what `base` currency to pass when converting from the product's `base_price`).
+**✅ Implementation Status:**
+* FX API is fully integrated into the server actions for creating and updating invoices and quotes
+* The product pricing logic has been implemented as specified:
+  1. Uses product's additional price if available for the document currency
+  2. Falls back to base price when needed
+  3. Performs currency conversion when necessary
+  4. Stores the FX rate on each line item for historical accuracy
+* The System Base Currency is properly used for all FX conversions
+* Caching has been implemented to reduce API calls and improve performance
+* Fallback mechanisms have been added in case the external rate source is unavailable
 
 ## 3. Product Module Enhancements
 
