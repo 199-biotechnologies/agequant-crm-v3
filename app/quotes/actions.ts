@@ -1,263 +1,511 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies } from 'next/headers';
-import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { redirect } from 'next/navigation';
-import { z } from "zod";
-
-// --- Quote Schema (Copied from QuoteForm for server-side validation) ---
-// TODO: Refactor schema into a shared file (e.g., lib/schemas/quote.ts)
-const lineItemSchema = z.object({
-  // id: z.string().optional(), // DB ID if needed
-  productId: z.string().uuid("Invalid product ID format").min(1, "Product is required"),
-  description: z.string().min(1, "Description is required").max(1000, "Description too long"),
-  quantity: z.preprocess(
-    (val) => (typeof val === 'string' ? parseInt(val, 10) : val),
-    z.number().int().min(1, "Quantity must be at least 1")
-  ),
-  unitPrice: z.preprocess(
-    (val) => (typeof val === 'string' ? parseFloat(val) : val),
-    z.number().min(0, "Unit price cannot be negative")
-  ),
-  // total is calculated, omit from validation
-});
-
-const quoteFormSchema = z.object({
-  entityId: z.string().uuid("Invalid entity ID format").min(1, "Issuing Entity is required"),
-  customerId: z.string().uuid("Invalid customer ID format").min(1, "Customer is required"),
-  issueDate: z.string().min(1, "Issue date is required").refine(val => !isNaN(Date.parse(val)), { message: "Invalid issue date" }),
-  expiryDate: z.string().min(1, "Expiry date is required").refine(val => !isNaN(Date.parse(val)), { message: "Invalid expiry date" }),
-  currency: z.string().length(3, "Currency code must be 3 letters").min(1, "Currency is required"),
-  discountPercent: z.preprocess(
-    (val) => (typeof val === 'string' ? parseFloat(val) : val),
-    z.number().min(0).max(100).optional().default(0)
-  ),
-  taxPercent: z.preprocess(
-    (val) => (typeof val === 'string' ? parseFloat(val) : val),
-    z.number().min(0, "Tax cannot be negative").max(100, "Tax cannot exceed 100%").default(0)
-  ),
-  notes: z.string().max(2000, "Notes/Terms too long").optional(),
-  lineItems: z.array(lineItemSchema).min(1, "At least one line item is required"),
-  // status: z.enum(['Draft', 'Sent', 'Accepted', 'Rejected']).optional(), // Example if status is part of form
-});
-
-type QuoteFormValues = z.infer<typeof quoteFormSchema>;
-
+import { getServerSupabaseClient } from '@/lib/supabase/server-client';
+import {
+  quoteFormSchema,
+  // QuoteFormValues - unused
+  DbQuote,
+  DbLineItem
+} from '@/lib/schemas/financial-documents';
+import { 
+  handleValidationError, 
+  handleDatabaseError, 
+  ErrorResponse 
+} from '@/lib/utils/error-handler';
 
 // --- Shared Types for Quote Data Structure ---
-export interface DbQuoteLineItem {
-  id: string;
-  product_id: string;
-  description: string;
-  quantity: number;
-  unit_price: number;
-  product?: { name?: string };
+export interface DbQuoteWithItems extends DbQuote {
+  items: DbLineItem[];
 }
 
-export interface DbQuoteData {
-  id: string;
-  quote_number?: string | null;
-  customer_id: string;
-  issuing_entity_id: string;
-  issue_date: string;
-  expiry_date: string;
-  currency_code: string;
-  discount_percentage?: number | null;
-  tax_percentage?: number | null;
-  notes?: string | null;
-  status?: string | null;
-  customer?: { company_contact_name?: string | null; email?: string | null; phone?: string | null; } | null;
-  issuing_entity?: { entity_name?: string | null; } | null;
-  line_items?: DbQuoteLineItem[] | null;
-}
-// --- End Shared Types ---
-// --- End Schema ---
-
-
-// --- Helper Function to Get Supabase Client ---
-async function getSupabaseClient() {
-  const cookieStore = await cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) { return cookieStore.get(name)?.value },
-        set(name: string, value: string, options: CookieOptions) { cookieStore.set({ name, value, ...options }) },
-        remove(name: string, options: CookieOptions) { cookieStore.set({ name, value: '', ...options }) },
-      },
-    }
-  );
+export interface QuoteWithRelations extends DbQuote {
+  customer: {
+    id: string;
+    public_customer_id: string;
+    company_contact_name: string;
+  };
+  entity: {
+    id: string;
+    name: string;
+  };
+  payment_source: {
+    id: string;
+    name: string;
+  };
+  items: DbLineItem[];
 }
 
-// --- Get Quote By ID ---
-// Fetches a single quote with its details for view/edit pages
-// NOTE: Assumes internal UUID `id` is passed
-export async function getQuoteById(id: string): Promise<{ quote: DbQuoteData | null; error: string | null }> {
-  if (!id || typeof id !== 'string') {
-    console.error("Invalid Quote ID provided for getQuoteById.");
-    return { error: "Invalid Quote ID.", quote: null };
-  }
+/**
+ * Retrieves a quote by its ID with all related data
+ * 
+ * @param id - The quote ID (UUID)
+ * @returns The quote with its related data, or null if not found
+ */
+export async function getQuoteById(id: string): Promise<QuoteWithRelations | null> {
+  if (!id) return null;
 
-  const supabase = await getSupabaseClient();
+  const supabase = await getServerSupabaseClient();
 
-  // Fetch quote header and related data
-  const { data, error } = await supabase
+  const { data: quote, error } = await supabase
     .from('quotes')
     .select(`
-      id, quote_number, customer_id, issuing_entity_id, issue_date, expiry_date,
-      currency_code, discount_percentage, tax_percentage, notes, status,
-      customer:customers(company_contact_name, email, phone),
-      issuing_entity:issuing_entities(entity_name),
-      line_items:quote_line_items(id, product_id, description, quantity, unit_price, product:products(name))
+      *,
+      customer:customers(id, public_customer_id, company_contact_name),
+      entity:issuing_entities(id, name),
+      payment_source:payment_sources(id, name),
+      items:quote_items(*)
     `)
     .eq('id', id)
+    .is('deleted_at', null)
     .single();
 
-  if (error) {
-    console.error(`Error fetching quote with ID ${id}:`, error);
-    if (error.code === 'PGRST116') {
-      return { error: "Quote not found.", quote: null };
-    }
-    return { error: `Database error: ${error.message}`, quote: null };
+  if (error || !quote) {
+    console.error('Error fetching quote:', error);
+    return null;
   }
 
-  if (!data) {
-    return { error: "Quote not found.", quote: null };
-  }
-
-  const quote = data as DbQuoteData;
-
-  return { quote, error: null };
+  return quote as unknown as QuoteWithRelations;
 }
 
-// --- Create Quote ---
-// TODO: Implement createQuote action
-// export async function createQuote(formData: FormData) { ... }
+/**
+ * Creates a new quote
+ * 
+ * @param formData - Form data containing quote details
+ * @returns Success or error response
+ */
+export async function createQuote(formData: FormData) {
+  const supabase = await getServerSupabaseClient();
 
-
-// --- Update Quote ---
-export async function updateQuote(id: string, formData: FormData) {
-  if (!id || typeof id !== 'string') {
-    console.error("Invalid Quote ID provided for update.");
-    return { success: false, error: "Invalid Quote ID." };
-  }
-
-  const supabase = await getSupabaseClient();
-
-  // 1. Validate formData
-  const rawFormData = Object.fromEntries(formData.entries());
-
-  // Handle lineItems JSON string if necessary (same pattern as invoices)
-  // TODO: Robust FormData handling for line items
-  type ParsedLineItem = z.infer<typeof lineItemSchema>; // Type for individual line items
-  let lineItemsForValidation: ParsedLineItem[] = []; // Use this variable
-
-  if (typeof rawFormData.lineItems === 'string') {
-    try {
-      const parsed = JSON.parse(rawFormData.lineItems);
-      if (Array.isArray(parsed)) {
-        lineItemsForValidation = parsed;
-      } else {
-        throw new Error("Parsed lineItems is not an array.");
-      }
-    } catch (e) {
-      const err = e instanceof Error ? e : new Error(String(e));
-      console.error("Failed to parse lineItems JSON for quote:", err.message);
-      return { success: false, error: "Invalid line item data format." };
-    }
-  } else if (Array.isArray(rawFormData.lineItems)) {
-     lineItemsForValidation = rawFormData.lineItems;
-  }
-  // If lineItems is not a string or array, it will default to empty or fail Zod validation.
-
-  const validatedFields = quoteFormSchema.safeParse({
-    ...rawFormData,
-    lineItems: lineItemsForValidation, // Use the correctly populated array
-    discountPercent: rawFormData.discountPercent,
-    taxPercent: rawFormData.taxPercent,
-  });
-
-  if (!validatedFields.success) {
-    console.error("Server Validation Error (Update Quote):", validatedFields.error.flatten().fieldErrors);
-    return { success: false, error: "Validation failed.", errors: validatedFields.error.flatten().fieldErrors };
-  }
-
-  const validatedData: QuoteFormValues = validatedFields.data;
-  const { lineItems, ...quoteHeaderData } = validatedData;
-
-  // Map validated data to database columns for the quote header
-  const dbQuoteData = {
-    customer_id: quoteHeaderData.customerId,
-    issuing_entity_id: quoteHeaderData.entityId,
-    issue_date: quoteHeaderData.issueDate,
-    expiry_date: quoteHeaderData.expiryDate,
-    currency_code: quoteHeaderData.currency,
-    discount_percentage: quoteHeaderData.discountPercent,
-    tax_percentage: quoteHeaderData.taxPercent,
-    notes: quoteHeaderData.notes || null,
-    // status: quoteHeaderData.status || 'Draft',
-    // updated_at handled by DB
-  };
-
-  // Map line items for database insertion
-  const dbLineItemsData = lineItems.map(item => ({
-    quote_id: id, // Link to the parent quote
-    product_id: item.productId,
-    description: item.description,
-    quantity: item.quantity,
-    unit_price: item.unitPrice,
-  }));
-
-  // --- Database Operations (Simulated Transaction) ---
-  // TODO: Refactor to use an RPC function for atomicity.
+  // Parse and validate form data
   try {
-    // 1. Update Quote Header
-    const { error: updateHeaderError } = await supabase
-      .from('quotes')
-      .update(dbQuoteData)
-      .eq('id', id);
-
-    if (updateHeaderError) throw new Error(`Failed to update quote header: ${updateHeaderError.message}`);
-
-    // 2. Delete existing line items
-    const { error: deleteItemsError } = await supabase
-      .from('quote_line_items') // Assuming table name
-      .delete()
-      .eq('quote_id', id);
-
-    if (deleteItemsError) throw new Error(`Failed to clear existing line items: ${deleteItemsError.message}`);
-
-    // 3. Insert new line items
-    if (dbLineItemsData.length > 0) {
-      const { error: insertItemsError } = await supabase
-        .from('quote_line_items')
-        .insert(dbLineItemsData);
-
-      if (insertItemsError) throw new Error(`Failed to insert new line items: ${insertItemsError.message}`);
+    // Extract line items from the form data
+    const rawFormData = Object.fromEntries(formData.entries());
+    let lineItemsForValidation: any[] = [];
+    
+    if (typeof rawFormData.lineItems === 'string') {
+      try {
+        const parsed = JSON.parse(rawFormData.lineItems);
+        if (Array.isArray(parsed)) {
+          lineItemsForValidation = parsed;
+        } else {
+          throw new Error("Parsed lineItems is not an array.");
+        }
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        console.error("Failed to parse lineItems JSON:", err.message);
+        return { error: "Invalid line item data format." };
+      }
+    } else if (Array.isArray(rawFormData.lineItems)) {
+      lineItemsForValidation = rawFormData.lineItems;
     }
+    
+    // Create a complete form data object with parsed line items
+    const dataForValidation = {
+      ...rawFormData,
+      lineItems: lineItemsForValidation,
+    };
+
+    // Validate with Zod schema
+    const validatedFields = quoteFormSchema.safeParse(dataForValidation);
+    if (!validatedFields.success) {
+      return handleValidationError(validatedFields.error, 'quote');
+    }
+
+    // --- Prepare for database insertion ---
+
+    // 1. Calculate totals
+    const lineItems = validatedFields.data.lineItems;
+    const subtotal = lineItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+    const discountAmount = subtotal * (validatedFields.data.discountPercent || 0) / 100;
+    const taxableAmount = subtotal - discountAmount;
+    const taxAmount = taxableAmount * (validatedFields.data.taxPercent / 100);
+    const totalAmount = taxableAmount + taxAmount;
+
+    // 2. Prepare quote data
+    const quoteData = {
+      entity_id: validatedFields.data.entityId,
+      customer_id: validatedFields.data.customerId,
+      issue_date: new Date(validatedFields.data.issueDate).toISOString(),
+      expiry_date: new Date(validatedFields.data.expiryDate).toISOString(),
+      currency_code: validatedFields.data.currency,
+      payment_source_id: validatedFields.data.paymentSourceId,
+      discount_percentage: validatedFields.data.discountPercent || 0,
+      tax_percentage: validatedFields.data.taxPercent,
+      notes: validatedFields.data.notes,
+      status: 'Draft', // Default status for new quotes
+      subtotal_amount: subtotal,
+      discount_amount: discountAmount,
+      tax_amount: taxAmount,
+      total_amount: totalAmount,
+    };
+
+    // 3. Start a transaction
+    // TODO: Refactor to use an RPC function for atomicity (see comprehensive-implementation-plan.md)
+    const { data: quote, error: quoteError } = await supabase
+      .from('quotes')
+      .insert([quoteData])
+      .select('id, quote_number')
+      .single();
+
+    if (quoteError) {
+      return handleDatabaseError(quoteError, 'create', 'quote');
+    }
+
+    // 4. Insert line items
+    const lineItemsData = lineItems.map(item => ({
+      quote_id: quote.id,
+      product_id: item.productId,
+      description: item.description,
+      quantity: item.quantity,
+      unit_price: item.unitPrice,
+      fx_rate: item.fxRate, // Add FX rate if provided
+      total_amount: item.quantity * item.unitPrice,
+    }));
+
+    const { error: lineItemsError } = await supabase
+      .from('quote_items')
+      .insert(lineItemsData);
+
+    if (lineItemsError) {
+      // This could leave a quote without items if there's an error - should use a true transaction
+      return handleDatabaseError(lineItemsError, 'create', 'quote items');
+    }
+
+    // Revalidate cache and redirect
+    revalidatePath('/quotes');
+    redirect(`/quotes/${quote.id}`);
 
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-    console.error("Error during quote update transaction simulation:", errorMessage);
-    return { success: false, error: errorMessage || "Failed to update quote." };
+    console.error('Unexpected error creating quote:', error);
+    return { 
+      error: 'An unexpected error occurred while creating the quote.' 
+    };
   }
-
-  // --- Success ---
-  console.log(`Quote ${id} updated successfully.`);
-
-  // Revalidate relevant paths
-  revalidatePath('/quotes');
-  revalidatePath(`/quotes/${id}`);
-  revalidatePath(`/quotes/${id}/edit`);
-
-  // Redirect to the view page
-  redirect(`/quotes/${id}`);
-
-  return { success: true, error: null };
 }
 
-// --- Delete Quote ---
-// TODO: Decide if quotes can be deleted (soft delete?) or only marked as void/cancelled/rejected
-// export async function deleteQuote(id: string) { ... }
+/**
+ * Updates an existing quote
+ * 
+ * @param id - Quote ID to update
+ * @param formData - Form data containing updated quote details
+ * @returns Success or error response
+ */
+export async function updateQuote(id: string, formData: FormData): Promise<ErrorResponse | void> {
+  if (!id) {
+    return { error: "Invalid quote ID." };
+  }
+
+  const supabase = await getServerSupabaseClient();
+
+  // Parse and validate form data (similar to createQuote)
+  try {
+    // Extract line items from the form data
+    const rawFormData = Object.fromEntries(formData.entries());
+    let lineItemsForValidation: any[] = [];
+    
+    if (typeof rawFormData.lineItems === 'string') {
+      try {
+        const parsed = JSON.parse(rawFormData.lineItems);
+        if (Array.isArray(parsed)) {
+          lineItemsForValidation = parsed;
+        } else {
+          throw new Error("Parsed lineItems is not an array.");
+        }
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        console.error("Failed to parse lineItems JSON:", err.message);
+        return { error: "Invalid line item data format." };
+      }
+    } else if (Array.isArray(rawFormData.lineItems)) {
+      lineItemsForValidation = rawFormData.lineItems;
+    }
+    
+    // Create a complete form data object with parsed line items
+    const dataForValidation = {
+      ...rawFormData,
+      lineItems: lineItemsForValidation,
+    };
+
+    // Validate with Zod schema
+    const validatedFields = quoteFormSchema.safeParse(dataForValidation);
+    if (!validatedFields.success) {
+      return handleValidationError(validatedFields.error, 'quote');
+    }
+
+    // --- Prepare for database update ---
+
+    // 1. Calculate totals
+    const lineItems = validatedFields.data.lineItems;
+    const subtotal = lineItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+    const discountAmount = subtotal * (validatedFields.data.discountPercent || 0) / 100;
+    const taxableAmount = subtotal - discountAmount;
+    const taxAmount = taxableAmount * (validatedFields.data.taxPercent / 100);
+    const totalAmount = taxableAmount + taxAmount;
+
+    // 2. Prepare quote data update
+    const quoteData = {
+      entity_id: validatedFields.data.entityId,
+      customer_id: validatedFields.data.customerId,
+      issue_date: new Date(validatedFields.data.issueDate).toISOString(),
+      expiry_date: new Date(validatedFields.data.expiryDate).toISOString(),
+      currency_code: validatedFields.data.currency,
+      payment_source_id: validatedFields.data.paymentSourceId,
+      discount_percentage: validatedFields.data.discountPercent || 0,
+      tax_percentage: validatedFields.data.taxPercent,
+      notes: validatedFields.data.notes,
+      subtotal_amount: subtotal,
+      discount_amount: discountAmount,
+      tax_amount: taxAmount,
+      total_amount: totalAmount,
+      // Don't update status here unless explicitly included in the form
+      status: validatedFields.data.status || undefined,
+    };
+
+    // 3. Update the quote
+    const { error: quoteError } = await supabase
+      .from('quotes')
+      .update(quoteData)
+      .eq('id', id);
+
+    if (quoteError) {
+      return handleDatabaseError(quoteError, 'update', 'quote');
+    }
+
+    // 4. Handle line items
+    // First, get existing line items to determine what to update/delete/insert
+    const { data: existingItems } = await supabase
+      .from('quote_items')
+      .select('id')
+      .eq('quote_id', id);
+
+    const existingItemIds = existingItems?.map(item => item.id) || [];
+    const formItemIds = lineItems
+      .filter(item => item.id) // Only consider items with IDs (existing ones)
+      .map(item => item.id);
+
+    // Items to delete = existingItemIds - formItemIds
+    const itemsToDeleteIds = existingItemIds.filter(id => !formItemIds.includes(id));
+
+    if (itemsToDeleteIds.length > 0) {
+      // Delete removed items
+      const { error: deleteError } = await supabase
+        .from('quote_items')
+        .delete()
+        .in('id', itemsToDeleteIds);
+
+      if (deleteError) {
+        return handleDatabaseError(deleteError, 'delete', 'quote items');
+      }
+    }
+
+    // Process each line item (update existing, insert new)
+    for (const item of lineItems) {
+      const itemData = {
+        quote_id: id,
+        product_id: item.productId,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        fx_rate: item.fxRate,
+        total_amount: item.quantity * item.unitPrice,
+      };
+
+      if (item.id) {
+        // Update existing item
+        const { error: updateError } = await supabase
+          .from('quote_items')
+          .update(itemData)
+          .eq('id', item.id);
+
+        if (updateError) {
+          return handleDatabaseError(updateError, 'update', 'quote item');
+        }
+      } else {
+        // Insert new item
+        const { error: insertError } = await supabase
+          .from('quote_items')
+          .insert([itemData]);
+
+        if (insertError) {
+          return handleDatabaseError(insertError, 'create', 'quote item');
+        }
+      }
+    }
+
+    // Revalidate cache and redirect
+    revalidatePath('/quotes');
+    revalidatePath(`/quotes/${id}`);
+    redirect(`/quotes/${id}`);
+
+  } catch (error) {
+    console.error('Unexpected error updating quote:', error);
+    return { 
+      error: 'An unexpected error occurred while updating the quote.' 
+    };
+  }
+}
+
+/**
+ * Deletes a quote by marking it as deleted
+ * 
+ * @param id - Quote ID to delete
+ * @returns Success or error response
+ */
+export async function deleteQuote(id: string): Promise<ErrorResponse | { success: true }> {
+  if (!id) {
+    return { error: "Invalid quote ID." };
+  }
+
+  const supabase = await getServerSupabaseClient();
+
+  // Soft delete by setting deleted_at
+  const { error } = await supabase
+    .from('quotes')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', id);
+
+  if (error) {
+    return handleDatabaseError(error, 'delete', 'quote');
+  }
+
+  // Revalidate cache
+  revalidatePath('/quotes');
+  return { success: true };
+}
+
+/**
+ * Updates the status of a quote
+ * 
+ * @param id - Quote ID to update
+ * @param status - New status value
+ * @returns Success or error response
+ */
+export async function updateQuoteStatus(
+  id: string, 
+  status: 'Draft' | 'Sent' | 'Accepted' | 'Rejected' | 'Expired'
+): Promise<ErrorResponse | { success: true }> {
+  if (!id) {
+    return { error: "Invalid quote ID." };
+  }
+
+  const supabase = await getServerSupabaseClient();
+
+  const { error } = await supabase
+    .from('quotes')
+    .update({ status })
+    .eq('id', id);
+
+  if (error) {
+    return handleDatabaseError(error, 'update status', 'quote');
+  }
+
+  // Revalidate cache
+  revalidatePath('/quotes');
+  revalidatePath(`/quotes/${id}`);
+  return { success: true };
+}
+
+/**
+ * Converts a quote to an invoice
+ * 
+ * @param quoteId - ID of the quote to convert
+ * @param dueDate - Due date for the created invoice
+ * @returns Success or error response with the new invoice ID
+ */
+export async function convertQuoteToInvoice(
+  quoteId: string,
+  dueDate: string
+): Promise<ErrorResponse | { success: true; invoiceId: string }> {
+  if (!quoteId) {
+    return { error: "Invalid quote ID." };
+  }
+
+  const supabase = await getServerSupabaseClient();
+
+  try {
+    // 1. Get the quote with all its details
+    const quote = await getQuoteById(quoteId);
+    if (!quote) {
+      return { error: "Quote not found." };
+    }
+
+    // 2. Create invoice data based on quote
+    const invoiceData = {
+      entity_id: quote.entity_id,
+      customer_id: quote.customer_id,
+      issue_date: new Date().toISOString(),
+      due_date: new Date(dueDate).toISOString(),
+      currency_code: quote.currency_code,
+      payment_source_id: quote.payment_source_id,
+      tax_percentage: quote.tax_percentage,
+      notes: quote.notes,
+      status: 'Draft',
+      subtotal_amount: quote.subtotal_amount,
+      tax_amount: quote.tax_amount,
+      total_amount: quote.total_amount,
+      source_quote_id: quoteId,
+    };
+
+    // 3. Insert the invoice
+    const { data: invoice, error: invoiceError } = await supabase
+      .from('invoices')
+      .insert([invoiceData])
+      .select('id, invoice_number')
+      .single();
+
+    if (invoiceError) {
+      return handleDatabaseError(invoiceError, 'create', 'invoice from quote');
+    }
+
+    // 4. Copy line items from quote to invoice
+    if (quote.items && quote.items.length > 0) {
+      const lineItemsData = quote.items.map((item: any) => ({
+        invoice_id: invoice.id,
+        product_id: item.product_id,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        fx_rate: item.fx_rate,
+        total_amount: item.total_amount,
+      }));
+
+      const { error: lineItemsError } = await supabase
+        .from('invoice_items')
+        .insert(lineItemsData);
+
+      if (lineItemsError) {
+        return handleDatabaseError(lineItemsError, 'create', 'invoice items from quote');
+      }
+    }
+
+    // 5. Update quote status and link to invoice
+    const { error: updateError } = await supabase
+      .from('quotes')
+      .update({
+        status: 'Accepted',
+        converted_invoice_id: invoice.id
+      })
+      .eq('id', quoteId);
+
+    if (updateError) {
+      return handleDatabaseError(updateError, 'update', 'quote status after conversion');
+    }
+
+    // Revalidate cache
+    revalidatePath('/quotes');
+    revalidatePath('/invoices');
+    revalidatePath(`/quotes/${quoteId}`);
+
+    return { 
+      success: true,
+      invoiceId: invoice.id
+    };
+  } catch (error) {
+    console.error('Unexpected error converting quote to invoice:', error);
+    return { 
+      error: 'An unexpected error occurred during conversion.' 
+    };
+  }
+}
