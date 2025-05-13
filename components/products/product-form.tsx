@@ -26,7 +26,8 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { productFormSchema, type ProductFormData, allowedCurrencies, allowedProductUnits, allowedProductStatuses } from "./product-form-schema";
+import { productFormSchema, type ProductFormData } from "./product-form-schema";
+import { ALLOWED_CURRENCIES, PRODUCT_UNITS, PRODUCT_STATUSES } from "@/lib/constants";
 
 // Debounce function moved outside the component for stable reference
 // R: Return type of the debounced function, T: Argument types of the debounced function
@@ -56,13 +57,13 @@ interface ProductFormProps {
 
 export function ProductForm({ initialData, serverAction, baseCurrency = "USD" }: ProductFormProps) { // Provide a fallback default if needed
   // Filter allowed currencies based on the passed baseCurrency
-  const additionalCurrencies = allowedCurrencies.filter(c => c !== baseCurrency);
+  const additionalCurrencies = ALLOWED_CURRENCIES.filter(c => c !== baseCurrency);
 
   const form = useForm<ProductFormData>({
     resolver: zodResolver(productFormSchema),
     defaultValues: {
       name: initialData?.name || "",
-      unit: initialData?.unit || allowedProductUnits[0],
+      unit: initialData?.unit || PRODUCT_UNITS[0],
       base_price: initialData?.base_price || 0,
       status: initialData?.status || "Active",
       description: initialData?.description || "",
@@ -199,7 +200,7 @@ export function ProductForm({ initialData, serverAction, baseCurrency = "USD" }:
                     <Select onValueChange={field.onChange} defaultValue={field.value}>
                       <FormControl><SelectTrigger><SelectValue placeholder="Select unit" /></SelectTrigger></FormControl>
                       <SelectContent>
-                        {allowedProductUnits.map(unit => <SelectItem key={unit} value={unit}>{unit}</SelectItem>)}
+                        {PRODUCT_UNITS.map(unit => <SelectItem key={unit} value={unit}>{unit}</SelectItem>)}
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -227,7 +228,7 @@ export function ProductForm({ initialData, serverAction, baseCurrency = "USD" }:
                     <Select onValueChange={field.onChange} defaultValue={field.value}>
                       <FormControl><SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger></FormControl>
                       <SelectContent>
-                        {allowedProductStatuses.map(status => <SelectItem key={status} value={status}>{status}</SelectItem>)}
+                        {PRODUCT_STATUSES.map(status => <SelectItem key={status} value={status}>{status}</SelectItem>)}
                       </SelectContent>
                     </Select>
                     <FormMessage />

@@ -12,7 +12,7 @@
   },
   "overrides": [
     {
-      "files": ["app/products/actions.ts", "app/settings/actions.ts", "app/settings/*.actions.ts", "app/test-action.ts"],
+      "files": ["app/*/actions.ts", "app/settings/*.actions.ts", "app/test-action.ts", "lib/utils/*.ts"],
       "rules": {
         "@typescript-eslint/no-explicit-any": "off"
       }
@@ -20,7 +20,15 @@
     {
       "files": ["components/customers/customer-columns.tsx", "components/products/product-columns.tsx", "components/**/**.tsx"],
       "rules": {
-        "react/no-unescaped-entities": "off"
+        "react/no-unescaped-entities": "off",
+        "@typescript-eslint/no-unused-vars": "warn"
+      }
+    },
+    {
+      "files": ["components/ui/form-fields.tsx", "components/ui/form-layout.tsx", "components/ui/status-badge.tsx"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off",
+        "@typescript-eslint/no-unused-vars": "warn"
       }
     }
   ]

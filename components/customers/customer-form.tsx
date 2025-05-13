@@ -3,188 +3,140 @@
 
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
-// import { z } from "zod"; // No longer needed directly here
-// Remove useState, useTransition - will rely on form action
+// The Button component is used within FormActions, so we don't need to import it here
+// import { Button } from "@/components/ui/button"
+import { Form } from "@/components/ui/form"
+import { customerFormSchema, type CustomerFormData } from "./customer-form-schema"
+import { ALLOWED_CURRENCIES } from "@/lib/constants"
+import { useRouter } from "next/navigation"
 
-import { Button } from "@/components/ui/button"
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { customerFormSchema, type CustomerFormData, allowedCurrencies } from "./customer-form-schema"
+// Import our new form components
+import { 
+  FormInputField, 
+  FormSelectField, 
+  FormTextareaField 
+} from "@/components/ui/form-fields"
 
-// allowedCurrencies is now imported directly
+import { 
+  FormContainer, 
+  FormSection, 
+  FormRow, 
+  FormActions 
+} from "@/components/ui/form-layout"
 
 interface CustomerFormProps {
-  // initialData might need to include the public ID if we are editing
-  initialData?: Partial<CustomerFormData> & { public_customer_id?: string | null }; // Keep initialData structure
-  // Server action for <form action>. It should typically return void or Promise<void>.
-  // Error/state handling is often done via useFormState in the parent component.
+  initialData?: Partial<CustomerFormData> & { public_customer_id?: string | null };
   serverAction: (formData: FormData) => void | Promise<void>;
 }
 
 export function CustomerForm({ initialData, serverAction }: CustomerFormProps) {
-  // Remove useTransition and error state for now.
-  // Consider useFormState for more complex feedback later if needed.
+  const router = useRouter();
+  
   const form = useForm<CustomerFormData>({
     resolver: zodResolver(customerFormSchema),
     defaultValues: {
       company_contact_name: "",
       email: "",
       phone: "",
-      preferred_currency: undefined, // Or set a default like 'USD' if desired
+      preferred_currency: undefined,
       address: "",
       notes: "",
-      ...initialData, // Merge initialData here if provided
+      ...initialData,
     },
-  })
+  });
 
-  // No longer need the handleSubmit wrapper or startTransition
+  // Create cancel handler
+  const handleCancel = () => {
+    router.push('/customers');
+  };
 
   return (
     <Form {...form}>
-      {/* Use the action prop for the server action */}
-      {/* Remove onSubmit={form.handleSubmit(handleSubmit)} */}
-      <form action={serverAction} className="space-y-8">
-        {/* Add hidden input for publicCustomerId when editing */}
+      <FormContainer onSubmit={() => {
+        // Let the native form submission handle it
+        // This preserves the server action
+      }}>
         {initialData?.public_customer_id && (
           <input type="hidden" name="publicCustomerId" value={initialData.public_customer_id} />
         )}
-        {/* Company / Contact Name */}
-        <FormField
-          control={form.control}
-          name="company_contact_name"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Company / Contact Name</FormLabel>
-              <FormControl>
-                <Input placeholder="Acme Corp / John Doe" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+        
+        <FormSection 
+          title="Basic Information" 
+          description="Enter the customer's contact information."
+        >
+          <FormRow>
+            <FormInputField
+              control={form.control}
+              name="company_contact_name"
+              label="Company / Contact Name"
+              placeholder="Acme Corp / John Doe"
+              required={true}
+            />
 
-        {/* Email */}
-        <FormField
-          control={form.control}
-          name="email"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Email</FormLabel>
-              <FormControl>
-                <Input type="email" placeholder="contact@acme.com" {...field} />
-              </FormControl>
-              <FormDescription>
-                Used for sending invoices and quotes.
-              </FormDescription>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+            <FormInputField
+              control={form.control}
+              name="email"
+              label="Email"
+              placeholder="contact@acme.com"
+              type="email"
+              description="Used for sending invoices and quotes."
+            />
+          </FormRow>
+          
+          <FormRow>
+            <FormInputField
+              control={form.control}
+              name="phone"
+              label="Phone"
+              placeholder="+1 555-123-4567"
+            />
 
-        {/* Phone */}
-        <FormField
-          control={form.control}
-          name="phone"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Phone (Optional)</FormLabel>
-              <FormControl>
-                <Input placeholder="+1 555-123-4567" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+            <FormSelectField
+              control={form.control}
+              name="preferred_currency"
+              label="Preferred Currency"
+              placeholder="Select a currency"
+              options={ALLOWED_CURRENCIES.map((currency) => ({
+                value: currency,
+                label: currency
+              }))}
+            />
+          </FormRow>
+        </FormSection>
+        
+        <FormSection 
+          title="Additional Information" 
+          description="Add shipping address and notes for internal reference."
+        >
+          <FormTextareaField
+            control={form.control}
+            name="address"
+            label="Address"
+            placeholder="123 Main St&#10;Anytown, CA 91234&#10;USA"
+            description="Appears on invoices and quotes."
+            rows={3}
+          />
+          
+          <FormTextareaField
+            control={form.control}
+            name="notes"
+            label="Internal Notes"
+            placeholder="Any internal notes about this customer..."
+            rows={4}
+          />
+        </FormSection>
 
-        {/* Preferred Currency */}
-        <FormField
-          control={form.control}
-          name="preferred_currency"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Preferred Currency</FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a currency" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  {allowedCurrencies.map((currency) => (
-                    <SelectItem key={currency} value={currency}>
-                      {currency}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )}
+        {/* Use FormActions for consistent button layout */}
+        <FormActions
+          submitLabel={initialData ? "Update Customer" : "Save Customer"}
+          cancelAction={handleCancel}
+          cancelLabel="Cancel"
+          isSubmitting={form.formState.isSubmitting}
         />
-
-        {/* Address */}
-        <FormField
-          control={form.control}
-          name="address"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Address</FormLabel>
-              <FormControl>
-                <Textarea
-                  placeholder="123 Main St&#10;Anytown, CA 91234&#10;USA"
-                  className="resize-none" // Optional: prevent resizing
-                  {...field}
-                />
-              </FormControl>
-              <FormDescription>
-                Appears on invoices and quotes.
-              </FormDescription>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        {/* Notes */}
-        <FormField
-          control={form.control}
-          name="notes"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Internal Notes (Optional)</FormLabel>
-              <FormControl>
-                <Textarea
-                  placeholder="Any internal notes about this customer..."
-                  className="resize-none"
-                  {...field}
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        {/* Button type is submit, disabled state might need useFormStatus later */}
-        <Button type="submit">
-          {initialData ? "Update Customer" : "Save Customer"}
-        </Button>
-        {/* Error display needs rethinking with form actions, maybe useFormState */}
-      </form>
+        
+        {/* Hidden form action */}
+        <input type="hidden" name="formAction" value={serverAction.name} />
+      </FormContainer>
     </Form>
   )
 }

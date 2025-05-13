@@ -1,14 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { allowedCurrencies } from '@/components/products/product-form-schema'; 
+import { ALLOWED_CURRENCIES, type Currency } from '@/lib/constants';
 
-// Define the specific type for allowed currencies
-type AllowedCurrency = typeof allowedCurrencies[number];
-
-// Type guard to check if a string is an AllowedCurrency
-function isAllowedCurrency(currency: string | undefined): currency is AllowedCurrency {
+// Type guard to check if a string is an allowed Currency
+function isAllowedCurrency(currency: string | undefined): currency is Currency {
   if (!currency) return false;
   // Cast to string[] is safe here because `as const` creates a readonly array of string literals
-  return (allowedCurrencies as readonly string[]).includes(currency);
+  return (ALLOWED_CURRENCIES as readonly string[]).includes(currency);
 }
 
 
