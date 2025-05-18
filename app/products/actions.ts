@@ -6,9 +6,7 @@ import { getServerSupabaseClient } from '@/lib/supabase/server-client';
 import { productFormSchema } from "@/components/products/product-form-schema";
 import { getSystemBaseCurrency } from "@/app/settings/actions"; // Import settings action
 import { handleValidationError, handleDatabaseError, ErrorResponse } from '@/lib/utils/error-handler';
- 
-// Placeholder for the actual base URL of the app
-const APP_BASE_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+import { generateUniqueProductSku } from '@/lib/utils/id-utils'; // Import the new SKU generator
 
 /**
  * Creates a new product in the database
@@ -20,25 +18,13 @@ export async function createProduct(formData: FormData): Promise<ErrorResponse |
   const supabase = await getServerSupabaseClient();
 
   try {
-    // 1. Get a unique SKU
-    let sku = '';
-    try {
-      const skuResponse = await fetch(`${APP_BASE_URL}/api/ids/product_sku`);
-      if (!skuResponse.ok) {
-        const errorData = await skuResponse.json();
-        console.error('Error fetching SKU:', errorData);
-        return { error: `Failed to generate SKU: ${errorData.error || skuResponse.statusText}` };
-      }
-      const skuData = await skuResponse.json();
-      sku = skuData.sku;
-    } catch (e) {
-      console.error('Network or other error fetching SKU:', e);
-      return { error: 'Failed to generate SKU due to network error.' };
+    // 1. Get a unique SKU using the utility function
+    const skuResult = await generateUniqueProductSku(supabase);
+    if (skuResult.error || !skuResult.sku) {
+      console.error('Error generating SKU:', skuResult.error);
+      return { error: skuResult.error || 'Failed to generate SKU.' };
     }
-
-    if (!sku) {
-      return { error: 'Could not retrieve a unique SKU.' };
-    }
+    const sku = skuResult.sku;
 
     // 2. Validate formData
     const rawFormData: Record<string, any> = {}; 

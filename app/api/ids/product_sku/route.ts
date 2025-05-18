@@ -1,22 +1,12 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { generateUniqueProductSku } from '@/lib/utils/id-utils'; // Import the utility
 
-const SKU_CHARACTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Excludes O, I, 0, 1
-const SKU_LENGTH = 5;
-const SKU_PREFIX = 'PR-';
-const MAX_RETRIES = 10; // Max attempts to find a unique SKU
-
-function generateRandomCode(): string {
-  let result = '';
-  for (let i = 0; i < SKU_LENGTH; i++) {
-    result += SKU_CHARACTERS.charAt(Math.floor(Math.random() * SKU_CHARACTERS.length));
-  }
-  return result;
-}
+export const dynamic = 'force-dynamic'; // Ensure dynamic execution for cookie access
 
 export async function GET() {
-  const cookieStore = await cookies(); // Added await here
+  const cookieStore = await cookies(); 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -29,27 +19,12 @@ export async function GET() {
     }
   );
 
-  for (let i = 0; i < MAX_RETRIES; i++) {
-    const randomCode = generateRandomCode();
-    const potentialSku = `${SKU_PREFIX}${randomCode}`;
+  const skuResult = await generateUniqueProductSku(supabase);
 
-    const { data, error } = await supabase
-      .from('products')
-      .select('sku')
-      .eq('sku', potentialSku)
-      .maybeSingle();
-
-    if (error) {
-      console.error('Error checking SKU uniqueness:', error);
-      return NextResponse.json({ error: 'Database error while checking SKU uniqueness' }, { status: 500 });
-    }
-
-    if (!data) { // SKU is unique
-      return NextResponse.json({ sku: potentialSku });
-    }
-    // If data is found, SKU already exists, loop will retry
+  if (skuResult.error || !skuResult.sku) {
+    console.error('API Error generating SKU:', skuResult.error);
+    return NextResponse.json({ error: skuResult.error || 'Failed to generate SKU' }, { status: 500 });
   }
 
-  console.error('Failed to generate a unique SKU after multiple retries.');
-  return NextResponse.json({ error: 'Failed to generate a unique SKU' }, { status: 500 });
+  return NextResponse.json({ sku: skuResult.sku });
 }

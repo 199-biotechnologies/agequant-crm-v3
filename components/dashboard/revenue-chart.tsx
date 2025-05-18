@@ -3,17 +3,16 @@
 import { useEffect, useState } from "react"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 
-// Mock data for the chart
-const data = [
-  { month: "Jan", revenue: 4000 },
-  { month: "Feb", revenue: 3000 },
-  { month: "Mar", revenue: 5000 },
-  { month: "Apr", revenue: 4500 },
-  { month: "May", revenue: 6000 },
-  { month: "Jun", revenue: 5500 },
-]
+interface RevenueChartProps {
+  data: {
+    month: string
+    monthFull?: string
+    revenue: number
+  }[]
+  currencySymbol?: string
+}
 
-export function RevenueChart() {
+export function RevenueChart({ data, currencySymbol = "$" }: RevenueChartProps) {
   const [mounted, setMounted] = useState(false)
 
   // Prevent hydration errors with SSR
@@ -35,9 +34,16 @@ export function RevenueChart() {
         <BarChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey="month" tickLine={false} axisLine={false} />
-          <YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={60} />
+          <YAxis 
+            tickFormatter={(value) => `${currencySymbol}${value}`} 
+            tickLine={false} 
+            axisLine={false} 
+            width={60} 
+          />
           <Tooltip
-            formatter={(value) => [`$${value}`, "Revenue"]}
+            formatter={(value, name, props) => {
+              return [`${currencySymbol}${value}`, props.payload.monthFull ? props.payload.monthFull : "Revenue"]
+            }}
             contentStyle={{
               borderRadius: "6px",
               border: "1px solid #e2e8f0",

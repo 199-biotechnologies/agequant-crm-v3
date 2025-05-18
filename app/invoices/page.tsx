@@ -1,81 +1,76 @@
-import { DataTable } from "@/components/ui/data-table"
-import { InvoiceColumns, type Invoice } from "@/components/invoices/invoice-columns"
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
+import { DataTable } from "@/components/ui/data-table";
+import { InvoiceColumns, type Invoice } from "@/components/invoices/invoice-columns";
 
-// Mock data for invoices
-const invoices: Invoice[] = [
-  {
-    id: "H5K3N",
-    entity: "AgeQuant LLC",
-    customer: "Acme Corp",
-    issueDate: "2023-05-01",
-    dueDate: "2023-05-15",
-    status: "Overdue",
-    total: "$1,250.00",
-  },
-  {
-    id: "J7M2P",
-    entity: "AgeQuant LLC",
-    customer: "Globex Inc",
-    issueDate: "2023-05-05",
-    dueDate: "2023-05-20",
-    status: "Overdue",
-    total: "$3,450.00",
-  },
-  {
-    id: "K9R4S",
-    entity: "AgeQuant LLC",
-    customer: "Initech",
-    issueDate: "2023-05-10",
-    dueDate: "2023-05-25",
-    status: "Overdue",
-    total: "$2,780.00",
-  },
-  {
-    id: "L2T6V",
-    entity: "AgeQuant LLC",
-    customer: "Wayne Enterprises",
-    issueDate: "2023-05-15",
-    dueDate: "2023-05-30",
-    status: "Sent",
-    total: "$4,250.00",
-  },
-  {
-    id: "M4Y8X",
-    entity: "AgeQuant LLC",
-    customer: "Stark Industries",
-    issueDate: "2023-05-20",
-    dueDate: "2023-06-05",
-    status: "Sent",
-    total: "$7,450.00",
-  },
-  {
-    id: "N6Z2C",
-    entity: "AgeQuant LLC",
-    customer: "Umbrella Corp",
-    issueDate: "2023-05-25",
-    dueDate: "2023-06-10",
-    status: "Draft",
-    total: "$5,780.00",
-  },
-  {
-    id: "P8B4V",
-    entity: "AgeQuant LLC",
-    customer: "Cyberdyne Systems",
-    issueDate: "2023-05-28",
-    dueDate: "2023-06-12",
-    status: "Paid",
-    total: "$6,320.00",
-  },
-]
+async function getInvoices(): Promise<Invoice[]> {
+  const cookieStore = cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) { return cookieStore.get(name)?.value },
+      },
+    }
+  );
 
-export default function InvoicesPage() {
+  const { data, error } = await supabase
+    .from('invoices')
+    .select(`
+      *,
+      entity:issuing_entities(id, entity_name),
+      customer:customers(id, public_customer_id, company_contact_name)
+    `)
+    .is('deleted_at', null)
+    .order('issue_date', { ascending: false });
+
+  if (error) {
+    console.error("Error fetching invoices:", error);
+    return [];
+  }
+
+  // Transform the data to match the Invoice type
+  return (data || []).map(invoice => {
+    // Calculate the total from invoice_items if needed
+    // This is a simplified version - in a real app you might want to
+    // join with invoice_items and calculate the total
+    const total = formatCurrency(invoice.total_amount || 0, invoice.currency_code || 'USD');
+
+    return {
+      id: invoice.invoice_number,
+      entity: invoice.entity?.entity_name || 'Unknown Entity',
+      customer: invoice.customer?.company_contact_name || 'Unknown Customer',
+      issueDate: invoice.issue_date,
+      dueDate: invoice.due_date,
+      status: invoice.status,
+      total,
+    };
+  });
+}
+
+// Helper function to format currency
+function formatCurrency(amount: number, currencyCode: string): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currencyCode,
+  }).format(amount);
+}
+
+export default async function InvoicesPage() {
+  const invoices = await getInvoices();
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Invoices</h1>
       </div>
 
-      <DataTable columns={InvoiceColumns} data={invoices} />
+      {invoices.length === 0 ? (
+        <p className="text-muted-foreground">No invoices found. Create your first invoice to get started.</p>
+      ) : (
+        <DataTable columns={InvoiceColumns} data={invoices} />
+      )}
     </div>
-  )
+  );
 }

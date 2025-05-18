@@ -15,8 +15,15 @@ import {
   getTopProduct,
   getRecentlyUpdated
 } from "./dashboard/actions"
+import { getMonthlyRevenue } from "./dashboard/revenue-data"
+import { getBaseCurrency } from "@/app/api/fx/helper"
+import { getCurrencySymbol } from "@/lib/utils"
 
 export default async function Dashboard() {
+  // Get the base currency for revenue display
+  const baseCurrency = await getBaseCurrency()
+  const currencySymbol = getCurrencySymbol(baseCurrency)
+  
   // Fetch all dashboard data
   const [
     overdueInvoices,
@@ -25,7 +32,8 @@ export default async function Dashboard() {
     outstandingAmount,
     acceptedQuotes30d,
     topProduct,
-    recentlyUpdated
+    recentlyUpdated,
+    monthlyRevenue
   ] = await Promise.all([
     getOverdueInvoices(),
     getExpiringQuotes(),
@@ -33,8 +41,10 @@ export default async function Dashboard() {
     getOutstandingAmount(),
     getAcceptedQuotes30d(),
     getTopProduct(),
-    getRecentlyUpdated()
+    getRecentlyUpdated(),
+    getMonthlyRevenue()
   ])
+  
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -119,10 +129,13 @@ export default async function Dashboard() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle>Revenue Trend</CardTitle>
-              <CardDescription>Last 6 months</CardDescription>
+              <CardDescription>Last 6 months in {baseCurrency}</CardDescription>
             </CardHeader>
             <CardContent>
-              <RevenueChart />
+              <RevenueChart 
+                data={monthlyRevenue} 
+                currencySymbol={currencySymbol} 
+              />
             </CardContent>
           </Card>
 

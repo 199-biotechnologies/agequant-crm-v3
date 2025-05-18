@@ -31,7 +31,8 @@ import { FormError } from "@/components/ui/form-error"
 
 interface CustomerFormProps {
   initialData?: Partial<CustomerFormData> & { public_customer_id?: string | null };
-  serverAction: (formData: FormData) => void | Promise<void | ErrorResponse>;
+  // Updated serverAction return type to accommodate the new success object from createCustomer
+  serverAction: (formData: FormData) => Promise<ErrorResponse | { success: true; newCustomerId?: string } | void>;
 }
 
 export function CustomerForm({ initialData, serverAction }: CustomerFormProps) {
@@ -58,7 +59,7 @@ export function CustomerForm({ initialData, serverAction }: CustomerFormProps) {
   };
   
   // Handle form submission
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent) => { // Changed type of e
     e.preventDefault();
     
     // Clear any previous errors
@@ -67,28 +68,45 @@ export function CustomerForm({ initialData, serverAction }: CustomerFormProps) {
     
     try {
       // Get the form data
-      const formData = new FormData(e.currentTarget);
+      const formData = new FormData(e.currentTarget as HTMLFormElement); // Added type assertion
       
       // Submit the form data to the server action
       const result = await serverAction(formData);
       
       // Check if the result is an error
-      if (result && 'error' in result) {
-        // If there's an error, display it
+      if (result && 'error' in result && result.error) { // Check for result.error to be defensive
         setServerError(result as ErrorResponse);
         setIsSubmitting(false);
         
-        // If there are field errors, set them in the form
         if (result.fieldErrors) {
           Object.entries(result.fieldErrors).forEach(([field, errors]) => {
             if (errors && errors.length > 0) {
-              // Use type assertion to match field names to form keys
               form.setError(field as keyof CustomerFormData, {
                 type: 'server',
                 message: errors[0]
               });
             }
           });
+        }
+      } else if (result && 'success' in result && result.success) {
+        // On success, redirect to the main customers page
+        // Optionally, could redirect to the new customer's page if newCustomerId is available:
+        // router.push(result.newCustomerId ? `/customers/${result.newCustomerId}` : '/customers');
+        router.push('/customers');
+        // No need to setIsSubmitting(false) as we are navigating away
+      } else {
+        // Handle cases where the action completes but doesn't return a known success/error structure
+        // This might happen if an action using internal redirect (like updateCustomer still does) is called
+        // or if an action has a void return on success and no redirect.
+        // If initialData exists, it's an update, assume redirect happened in action or revalidation is enough.
+        if (initialData?.public_customer_id) {
+          // For updates, if no error, assume success and Next.js handles re-render or redirect from action
+          // router.refresh(); // could also just refresh
+        } else {
+          // This case should ideally not be hit for createCustomer now.
+          // If it is, it means createCustomer didn't return {success: true}
+           console.warn("Server action finished without a clear success/error state for create operation.");
+           setIsSubmitting(false);
         }
       }
     } catch (error) {
